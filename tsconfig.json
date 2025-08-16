@@ -1,0 +1,18 @@
+{
+  "extends": ["@tsconfig/node22/tsconfig.json", "@tsconfig/node-ts/tsconfig.json"],
+  "include": ["src/**/*", "tests/**/*"],
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "NodeNext",
+    "moduleResolution": "nodenext",
+    "strict": true, // Enable all strict type checking options
+    "esModuleInterop": true, // Enables emit interoperability between CommonJS and ES Modules
+    "skipLibCheck": true, // Skip type checking of all declaration files (*.d.ts)
+    "forceConsistentCasingInFileNames": true, // Disallow inconsistently-cased references to the same file
+    "sourceMap": true, // Emits source maps (useful for debugging)
+    "declaration": true, // Generates corresponding '.d.ts' file
+    "declarationMap": true, // Create sourcemaps for '.d.ts' files.
+    "rootDir": ".",
+    "outDir": "dist"
+  }
+}

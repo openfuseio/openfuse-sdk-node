@@ -1,0 +1,13 @@
+# dependencies
+node_modules/
+.pnp.cjs
+.pnp.loader.mjs
+
+# build
+/dist
+*.tsbuildinfo
+
+# misc
+.DS_Store
+coverage/
+_prompt.ts

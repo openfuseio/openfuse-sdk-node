@@ -1,0 +1,176 @@
+import { AbortOperationError, APIError, AuthError } from './errors.ts'
+import type {
+  TEndpointProvider,
+  THttpMethod,
+  TRequestOptions,
+  TRetryPolicy,
+  TTokenProvider,
+} from './types.ts'
+
+const DEFAULT_RETRY_POLICY: TRetryPolicy = {
+  attempts: 3,
+  baseDelayInMilliseconds: 100,
+  maximumDelayInMilliseconds: 1000,
+}
+const DEFAULT_TIMEOUT_IN_MILLISECONDS = 1500
+const DEFAULT_USER_AGENT = `openfuse-sdk/0.1.0`
+
+function sleep(milliseconds: number, abortSignal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(resolve, milliseconds)
+    if (abortSignal) {
+      const onAbort = () => {
+        clearTimeout(timeoutId)
+        reject(new AbortOperationError())
+      }
+      if (abortSignal.aborted) onAbort()
+      abortSignal.addEventListener('abort', onAbort, { once: true })
+    }
+  })
+}
+
+function calculateBackoffDelay(
+  currentAttemptIndex: number,
+  baseDelayInMilliseconds: number,
+  maximumDelayInMilliseconds: number,
+): number {
+  const exponential: number = Math.min(
+    maximumDelayInMilliseconds,
+    baseDelayInMilliseconds * Math.pow(2, currentAttemptIndex),
+  )
+  const jitter: number = Math.random() * 0.25 * exponential
+  return exponential + jitter
+}
+
+function combineAbortSignals(primary: AbortSignal, secondary?: AbortSignal): AbortSignal {
+  if (!secondary) return primary
+  const controller: AbortController = new AbortController()
+  const propagate = () => controller.abort()
+  if (primary.aborted || secondary.aborted) controller.abort()
+  primary.addEventListener('abort', propagate)
+  secondary.addEventListener('abort', propagate)
+  return controller.signal
+}
+
+type TTransportOptions = {
+  endpointProvider: TEndpointProvider
+  tokenProvider: TTokenProvider
+  retryPolicy?: TRetryPolicy
+  fetchImplementation?: typeof fetch | undefined
+}
+
+export class Transport {
+  private endpointProvider: TEndpointProvider
+  private tokenProvider: TTokenProvider
+  private retryPolicy: TRetryPolicy
+  private userAgent: string = DEFAULT_USER_AGENT
+  private fetchImplementation?: typeof fetch
+
+  constructor(options: TTransportOptions) {
+    this.endpointProvider = options.endpointProvider
+    this.tokenProvider = options.tokenProvider
+    this.retryPolicy = options.retryPolicy ?? DEFAULT_RETRY_POLICY
+    this.fetchImplementation =
+      options.fetchImplementation ?? (globalThis as unknown as { fetch?: typeof fetch }).fetch
+  }
+
+  async request<TResponse>(
+    httpMethod: THttpMethod,
+    path: string,
+    requestOptions: TRequestOptions = {},
+  ): Promise<TResponse> {
+    const baseUrl: string = this.endpointProvider.getApiBase().replace(/\/$/, '')
+    const urlObject: URL = new URL(baseUrl + path)
+
+    if (requestOptions.queryString) {
+      for (const [queryKey, queryValue] of Object.entries(requestOptions.queryString)) {
+        if (queryValue !== undefined) urlObject.searchParams.set(queryKey, String(queryValue))
+      }
+    }
+
+    const timeoutInMilliseconds: number =
+      requestOptions.timeoutInMilliseconds ?? DEFAULT_TIMEOUT_IN_MILLISECONDS
+    const timeoutController: AbortController = new AbortController()
+    const timeoutId: NodeJS.Timeout = setTimeout(
+      () => timeoutController.abort(),
+      timeoutInMilliseconds,
+    )
+    const combinedSignal: AbortSignal = requestOptions.signal
+      ? combineAbortSignals(timeoutController.signal, requestOptions.signal)
+      : timeoutController.signal
+
+    if (!this.fetchImplementation)
+      throw new APIError('No fetch implementation available in this runtime')
+
+    try {
+      let lastError: unknown
+      for (let attemptIndex = 0; attemptIndex < this.retryPolicy.attempts; attemptIndex++) {
+        try {
+          const bearerToken: string = await this.tokenProvider.getToken(combinedSignal)
+          const httpResponse: Response = await this.fetchImplementation(urlObject, {
+            method: httpMethod,
+            headers: {
+              authorization: `Bearer ${bearerToken}`,
+              'user-agent': this.userAgent,
+              ...(requestOptions.body ? { 'content-type': 'application/json' } : {}),
+              ...(requestOptions.headers ?? {}),
+            },
+            body: requestOptions.body ? JSON.stringify(requestOptions.body) : undefined,
+            signal: combinedSignal,
+          } as RequestInit)
+
+          if (httpResponse.status === 401 || httpResponse.status === 403) {
+            throw new AuthError(`Authentication failed with status ${httpResponse.status}`)
+          }
+
+          if (!httpResponse.ok) {
+            if (
+              httpResponse.status >= 500 &&
+              httpResponse.status <= 599 &&
+              attemptIndex < this.retryPolicy.attempts - 1
+            ) {
+              await sleep(
+                calculateBackoffDelay(
+                  attemptIndex,
+                  this.retryPolicy.baseDelayInMilliseconds,
+                  this.retryPolicy.maximumDelayInMilliseconds,
+                ),
+                combinedSignal,
+              )
+              continue
+            }
+            let parsedBody: unknown
+            try {
+              parsedBody = await httpResponse.json()
+            } catch {
+              /* swallow parse errors */
+            }
+            throw new APIError(`HTTP ${httpResponse.status} for ${httpMethod} ${path}`)
+          }
+
+          if (httpResponse.status === 204) return undefined as unknown as TResponse
+          const parsedJson: TResponse = (await httpResponse.json()) as TResponse
+          return parsedJson
+        } catch (caughtError) {
+          lastError = caughtError
+          if (caughtError instanceof APIError || caughtError instanceof AuthError) throw caughtError
+          if (attemptIndex < this.retryPolicy.attempts - 1) {
+            await sleep(
+              calculateBackoffDelay(
+                attemptIndex,
+                this.retryPolicy.baseDelayInMilliseconds,
+                this.retryPolicy.maximumDelayInMilliseconds,
+              ),
+              combinedSignal,
+            )
+            continue
+          }
+          throw caughtError
+        }
+      }
+      throw lastError
+    } finally {
+      clearTimeout(timeoutId)
+    }
+  }
+}
