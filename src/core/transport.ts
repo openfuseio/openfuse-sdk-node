@@ -1,5 +1,6 @@
 import { AbortOperationError, APIError, AuthError } from './errors.ts'
 import type {
+  TAPIResponse,
   TEndpointProvider,
   THttpMethod,
   TRequestOptions,
@@ -139,18 +140,28 @@ export class Transport {
               )
               continue
             }
-            let parsedBody: unknown
+            let errorDetail = ''
             try {
-              parsedBody = await httpResponse.json()
+              const body: unknown = await httpResponse.json()
+              if (
+                typeof body === 'object' &&
+                body !== null &&
+                'message' in body &&
+                typeof body.message === 'string'
+              ) {
+                errorDetail = `: ${body.message}`
+              }
             } catch {
-              /* swallow parse errors */
+              // JSON parse failed
             }
-            throw new APIError(`HTTP ${httpResponse.status} for ${httpMethod} ${path}`)
+            throw new APIError(
+              `HTTP ${httpResponse.status} for ${httpMethod} ${path}${errorDetail}`,
+            )
           }
 
           if (httpResponse.status === 204) return undefined as unknown as TResponse
-          const parsedJson: TResponse = (await httpResponse.json()) as TResponse
-          return parsedJson
+          const parsedJson = (await httpResponse.json()) as TAPIResponse<TResponse>
+          return parsedJson.data
         } catch (caughtError) {
           lastError = caughtError
           if (caughtError instanceof APIError || caughtError instanceof AuthError) throw caughtError

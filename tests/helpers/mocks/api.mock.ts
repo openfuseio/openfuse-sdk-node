@@ -1,5 +1,6 @@
 import { vi } from 'vitest'
 import { BreakersApi } from '../../../src/domains/breakers/breakers.api.ts'
+import { MetricsApi } from '../../../src/domains/metrics/metrics.api.ts'
 import { SystemsApi } from '../../../src/domains/system/system.api.ts'
 
 export const setupAPISpies = () => ({
@@ -10,7 +11,10 @@ export const setupAPISpies = () => ({
   breakers: {
     listBreakers: vi.spyOn(BreakersApi.prototype, 'listBreakers'),
     getBreaker: vi.spyOn(BreakersApi.prototype, 'getBreaker'),
-    getBreakerState: vi.spyOn(BreakersApi.prototype, 'getBreakerState'),
+  },
+  metrics: {
+    ingest: vi.spyOn(MetricsApi.prototype, 'ingest'),
+    listMetrics: vi.spyOn(MetricsApi.prototype, 'listMetrics'),
   },
 })
 

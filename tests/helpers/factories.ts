@@ -84,3 +84,20 @@ export function makeBootstrap({
   }
   return { system: madeSystem, breakers: madeBreakers }
 }
+
+export type TMetricDefinition = {
+  id: string
+  slug: string
+  name: string
+  unit: string
+}
+
+export const STANDARD_METRIC_DEFINITIONS: TMetricDefinition[] = [
+  { id: 'metric-success-id', slug: 'success', name: 'Success Count', unit: 'count' },
+  { id: 'metric-failure-id', slug: 'failure', name: 'Failure Count', unit: 'count' },
+  { id: 'metric-timeout-id', slug: 'timeout', name: 'Timeout Count', unit: 'count' },
+  { id: 'metric-total-id', slug: 'total', name: 'Total Count', unit: 'count' },
+  { id: 'metric-p50-id', slug: 'latency-p50', name: 'Latency P50', unit: 'ms' },
+  { id: 'metric-p95-id', slug: 'latency-p95', name: 'Latency P95', unit: 'ms' },
+  { id: 'metric-p99-id', slug: 'latency-p99', name: 'Latency P99', unit: 'ms' },
+]

@@ -1,0 +1,31 @@
+#!/bin/sh
+
+# Extract ticket number from branch name and add to commit message footer
+# Follows Conventional Commits spec: ticket refs go in footer, not header
+
+COMMIT_MSG_FILE=$1
+COMMIT_SOURCE=$2
+
+# Only run for regular commits (not merge, squash, etc.)
+if [ -z "$COMMIT_SOURCE" ] || [ "$COMMIT_SOURCE" = "message" ]; then
+  # Get current branch name
+  BRANCH_NAME=$(git symbolic-ref --short HEAD 2>/dev/null)
+
+  if [ -n "$BRANCH_NAME" ]; then
+    # Extract ticket number from branch name
+    # Matches patterns like: OF-123, JIRA-456, ABC-789
+    TICKET=$(echo "$BRANCH_NAME" | grep -oE '[A-Z]+-[0-9]+' | head -1)
+
+    if [ -n "$TICKET" ]; then
+      # Check if ticket reference already exists in commit message
+      if ! grep -q "Refs: $TICKET" "$COMMIT_MSG_FILE"; then
+        # Add ticket reference to footer following git trailer format
+        # If there's already content, add blank line before footer
+        if [ -s "$COMMIT_MSG_FILE" ] && ! tail -1 "$COMMIT_MSG_FILE" | grep -q '^$'; then
+          echo "" >> "$COMMIT_MSG_FILE"
+        fi
+        echo "Refs: $TICKET" >> "$COMMIT_MSG_FILE"
+      fi
+    fi
+  fi
+fi

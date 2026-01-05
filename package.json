@@ -22,11 +22,6 @@
     "dist"
   ],
   "sideEffects": false,
-  "config": {
-    "commitizen": {
-      "path": "cz-git"
-    }
-  },
   "scripts": {
     "build": "tsup src/index.ts --dts --format esm,cjs --clean",
     "dev": "tsup src/index.ts --watch --dts --format esm,cjs",
@@ -35,10 +30,12 @@
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
+    "e2e:local": "tsx examples/local-e2e.ts",
     "prepare": "husky",
     "git:commit": "git-cz"
   },
   "devDependencies": {
+    "@commitlint/cli": "^19.8.1",
     "@commitlint/config-conventional": "^19.8.1",
     "@faker-js/faker": "^9.9.0",
     "@tsconfig/node-ts": "^23.6.1",
@@ -54,6 +51,7 @@
     "husky": "^9.1.7",
     "lint-staged": "^16.1.5",
     "tsup": "^8.5.0",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
   }
