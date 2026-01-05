@@ -18,6 +18,10 @@ const commonTSConfig = {
 }
 
 export default [
+  /* ---------- Global ignores ---------- */
+  {
+    ignores: ['tsup.config.ts', 'dist/**'],
+  },
   /* -------- TypeScript test files ------- */
   {
     ...commonTSConfig,
@@ -32,7 +36,7 @@ export default [
   {
     ...commonTSConfig,
     files: ['**/*.ts'], // limit this block to TS files
-    ignores: ['**/*.test.ts'], // ignore test files
+    ignores: ['**/*.test.ts', 'tsup.config.ts'], // ignore test files and config
   },
 
   /* ---------- Plain JavaScript ---------- */

@@ -1,6 +1,6 @@
 {
   "extends": ["@tsconfig/node22/tsconfig.json", "@tsconfig/node-ts/tsconfig.json"],
-  "include": ["src/**/*", "tests/**/*"],
+  "include": ["src/**/*", "tests/**/*", "examples/**/*"],
   "compilerOptions": {
     "target": "ESNext",
     "module": "NodeNext",

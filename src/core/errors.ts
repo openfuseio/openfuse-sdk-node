@@ -43,3 +43,10 @@ export class AbortOperationError extends Error {
     this.name = 'AbortOperationError'
   }
 }
+/** Indicates an operation exceeded its timeout. */
+export class TimeoutError extends Error {
+  constructor(message = 'Operation timed out') {
+    super(message)
+    this.name = 'TimeoutError'
+  }
+}

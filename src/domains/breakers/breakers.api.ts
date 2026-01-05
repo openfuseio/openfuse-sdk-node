@@ -1,5 +1,5 @@
 import { Transport } from '../../core/transport.ts'
-import type { TBreaker, TBreakerStateResponse } from '../../types/api.ts'
+import type { TBreaker } from '../../types/api.ts'
 
 export type TBreakersApiOptions = {
   transport: Transport
@@ -8,8 +8,7 @@ export type TBreakersApiOptions = {
 /** Thin HTTP client over the breakers endpoints. No caching or extra logic. */
 export interface TBreakersApi {
   listBreakers(systemId: string, signal?: AbortSignal): Promise<TBreaker[]>
-  getBreaker(breakerId: string, signal?: AbortSignal): Promise<TBreaker>
-  getBreakerState(breakerId: string, signal?: AbortSignal): Promise<TBreakerStateResponse>
+  getBreaker(systemId: string, breakerId: string, signal?: AbortSignal): Promise<TBreaker>
 }
 
 export class BreakersApi implements TBreakersApi {
@@ -20,32 +19,22 @@ export class BreakersApi implements TBreakersApi {
   }
 
   public async listBreakers(systemId: string, signal?: AbortSignal): Promise<TBreaker[]> {
-    const breakers = await this.transport.request<TBreaker[]>(
+    return this.transport.request<TBreaker[]>(
       'GET',
       `/systems/${encodeURIComponent(systemId)}/breakers`,
       { signal },
     )
-    return breakers
   }
 
-  public async getBreaker(breakerId: string, signal?: AbortSignal): Promise<TBreaker> {
-    const breaker = await this.transport.request<TBreaker>(
-      'GET',
-      `/breakers/${encodeURIComponent(breakerId)}`,
-      { signal },
-    )
-    return breaker
-  }
-
-  public async getBreakerState(
+  public async getBreaker(
+    systemId: string,
     breakerId: string,
     signal?: AbortSignal,
-  ): Promise<TBreakerStateResponse> {
-    const state = await this.transport.request<TBreakerStateResponse>(
+  ): Promise<TBreaker> {
+    return this.transport.request<TBreaker>(
       'GET',
-      `/breakers/${encodeURIComponent(breakerId)}/state`,
+      `/systems/${encodeURIComponent(systemId)}/breakers/${encodeURIComponent(breakerId)}`,
       { signal },
     )
-    return state
   }
 }

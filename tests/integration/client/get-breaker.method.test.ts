@@ -46,8 +46,18 @@ describe('OpenFuse.getBreaker', () => {
 
       expect(mockAPI.breakers.listBreakers).not.toHaveBeenCalled()
       expect(mockAPI.breakers.getBreaker).toHaveBeenCalledTimes(2)
-      expect(mockAPI.breakers.getBreaker).toHaveBeenNthCalledWith(1, breaker.id, undefined)
-      expect(mockAPI.breakers.getBreaker).toHaveBeenNthCalledWith(2, breaker.id, undefined)
+      expect(mockAPI.breakers.getBreaker).toHaveBeenNthCalledWith(
+        1,
+        system.id,
+        breaker.id,
+        undefined,
+      )
+      expect(mockAPI.breakers.getBreaker).toHaveBeenNthCalledWith(
+        2,
+        system.id,
+        breaker.id,
+        undefined,
+      )
     })
   })
 
@@ -76,8 +86,18 @@ describe('OpenFuse.getBreaker', () => {
       expect(mockAPI.breakers.listBreakers).toHaveBeenCalledWith(system.id, undefined)
 
       expect(mockAPI.breakers.getBreaker).toHaveBeenCalledTimes(2)
-      expect(mockAPI.breakers.getBreaker).toHaveBeenNthCalledWith(1, breaker.id, undefined)
-      expect(mockAPI.breakers.getBreaker).toHaveBeenNthCalledWith(2, breaker.id, undefined)
+      expect(mockAPI.breakers.getBreaker).toHaveBeenNthCalledWith(
+        1,
+        system.id,
+        breaker.id,
+        undefined,
+      )
+      expect(mockAPI.breakers.getBreaker).toHaveBeenNthCalledWith(
+        2,
+        system.id,
+        breaker.id,
+        undefined,
+      )
     })
   })
 
@@ -102,7 +122,7 @@ describe('OpenFuse.getBreaker', () => {
       await client.bootstrap()
 
       await client.getBreaker(breaker.slug)
-      client.invalidate()
+      await client.invalidate()
 
       const again = await client.getBreaker(breaker.slug)
       expect(again).toEqual(breaker)
@@ -130,10 +150,9 @@ describe('OpenFuse.getBreaker', () => {
 
       await client.bootstrap()
 
-      const ac = new AbortController()
       const model = await client.getBreaker(breaker.slug)
       expect(model).toEqual(breaker)
-      expect(mockAPI.breakers.getBreaker).toHaveBeenCalledWith(breaker.id, undefined)
+      expect(mockAPI.breakers.getBreaker).toHaveBeenCalledWith(system.id, breaker.id, undefined)
     })
   })
 

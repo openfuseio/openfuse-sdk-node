@@ -34,3 +34,5 @@ export type TRetryPolicy = {
   baseDelayInMilliseconds: number
   maximumDelayInMilliseconds: number
 }
+
+export type TAPIResponse<T> = { data: T }

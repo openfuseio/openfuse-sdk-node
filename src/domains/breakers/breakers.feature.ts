@@ -1,6 +1,6 @@
 import { InflightRequests, TTLCache } from '../../core/cache.ts'
 import { NotFoundError } from '../../core/errors.ts'
-import type { TBreaker, TBreakerStateResponse } from '../../types/api.ts'
+import type { TBreaker, TBreakerStateValue } from '../../types/api.ts'
 import type { TBreakersApi } from './breakers.api.ts'
 
 type TBreakersFeatureOptions = {
@@ -13,14 +13,14 @@ type TBreakersFeatureOptions = {
  */
 export class BreakersFeature {
   private mapSlugToBreakerId: TTLCache<string, string>
-  private mapBreakerIdToState: TTLCache<string, TBreakerStateResponse>
+  private mapBreakerIdToState: TTLCache<string, TBreakerStateValue>
   private inflightRequests: InflightRequests<string, unknown>
   private api: TBreakersApi
 
   constructor(options: TBreakersFeatureOptions) {
     this.api = options.api
     this.mapSlugToBreakerId = new TTLCache<string, string>({ maximumEntries: 10_000 })
-    this.mapBreakerIdToState = new TTLCache<string, TBreakerStateResponse>({
+    this.mapBreakerIdToState = new TTLCache<string, TBreakerStateValue>({
       maximumEntries: 10_000,
     })
     this.inflightRequests = new InflightRequests<string, unknown>()
@@ -52,24 +52,28 @@ export class BreakersFeature {
   }
 
   private async getStateById(
+    systemId: string,
     breakerId: string,
     signal?: AbortSignal,
-  ): Promise<TBreakerStateResponse> {
-    const cached: TBreakerStateResponse | undefined = this.mapBreakerIdToState.get(breakerId)
+  ): Promise<TBreakerStateValue> {
+    const cached = this.mapBreakerIdToState.get(breakerId)
     if (cached) return cached
 
-    const inflightKey: string = `state:${breakerId}`
-    const stateResponse = await this.inflightRequests.run(inflightKey, async () => {
-      const data = await this.api.getBreakerState(breakerId, signal)
-      this.mapBreakerIdToState.set(breakerId, data, 3_000)
-      return data
+    const inflightKey = `state:${breakerId}`
+    const state = await this.inflightRequests.run(inflightKey, async () => {
+      const breaker = await this.api.getBreaker(systemId, breakerId, signal)
+      this.mapBreakerIdToState.set(breakerId, breaker.state, 3_000)
+      return breaker.state
     })
-    return stateResponse as TBreakerStateResponse
+    return state as TBreakerStateValue
   }
 
-  private async getBreakerById(breakerId: string, signal?: AbortSignal): Promise<TBreaker> {
-    const breaker: TBreaker = await this.api.getBreaker(breakerId, signal)
-    return breaker
+  private async getBreakerById(
+    systemId: string,
+    breakerId: string,
+    signal?: AbortSignal,
+  ): Promise<TBreaker> {
+    return this.api.getBreaker(systemId, breakerId, signal)
   }
 
   private async refreshMappingFromApi(systemId: string, signal?: AbortSignal): Promise<void> {
@@ -113,10 +117,9 @@ export class BreakersFeature {
     systemId: string,
     breakerSlug: string,
     signal?: AbortSignal,
-  ): Promise<TBreakerStateResponse['state']> {
-    const breakerId: string = await this.resolveOrRefreshMapping(systemId, breakerSlug, signal)
-    const response: TBreakerStateResponse = await this.getStateById(breakerId, signal)
-    return response.state
+  ): Promise<TBreakerStateValue> {
+    const breakerId = await this.resolveOrRefreshMapping(systemId, breakerSlug, signal)
+    return this.getStateById(systemId, breakerId, signal)
   }
 
   /** Resolves slug -> id and returns the breaker model. */
@@ -125,7 +128,24 @@ export class BreakersFeature {
     breakerSlug: string,
     signal?: AbortSignal,
   ): Promise<TBreaker> {
-    const breakerId: string = await this.resolveOrRefreshMapping(systemId, breakerSlug, signal)
-    return await this.getBreakerById(breakerId, signal)
+    const breakerId = await this.resolveOrRefreshMapping(systemId, breakerSlug, signal)
+    return this.getBreakerById(systemId, breakerId, signal)
+  }
+
+  /**
+   * Resolves a breaker slug to its ID.
+   * Returns null if the breaker is not found (does not throw).
+   * Used by MetricsFeature for resolving breaker slugs.
+   */
+  public async resolveBreakerId(
+    systemId: string,
+    breakerSlug: string,
+    signal?: AbortSignal,
+  ): Promise<string | null> {
+    try {
+      return await this.resolveOrRefreshMapping(systemId, breakerSlug, signal)
+    } catch {
+      return null
+    }
   }
 }

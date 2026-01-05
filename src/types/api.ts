@@ -11,8 +11,6 @@ export type TBreaker = {
 export type TBootstrapResponse = {
   system: { id: string; slug: string }
   breakers: TBreaker[]
-  etag?: string
-  version?: string | number
 }
 
 export type TBreakerStateResponse = {

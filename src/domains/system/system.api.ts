@@ -25,23 +25,21 @@ export class SystemsApi implements TSystemsApi {
     systemSlug: string,
     signal?: AbortSignal,
   ): Promise<{ id: string; slug: string }> {
-    const system = await this.transport.request<{ id: string; slug: string }>(
+    return this.transport.request<{ id: string; slug: string }>(
       'GET',
       `/systems/by-slug/${encodeURIComponent(systemSlug)}`,
       { signal },
     )
-    return system
   }
 
   public async bootstrapSystem(
     systemId: string,
     signal?: AbortSignal,
   ): Promise<TBootstrapResponse> {
-    const response = await this.transport.request<TBootstrapResponse>(
+    return this.transport.request<TBootstrapResponse>(
       'GET',
-      `/systems/${encodeURIComponent(systemId)}/bootstrap`,
-      { signal },
+      `/systems/${encodeURIComponent(systemId)}`,
+      { signal, queryString: { expand: 'breakers' } },
     )
-    return response
   }
 }
