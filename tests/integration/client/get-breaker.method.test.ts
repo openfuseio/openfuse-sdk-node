@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { OpenFuse } from '../../../src/client/openfuse.ts'
+import { Openfuse } from '../../../src/client/openfuse.ts'
 import type { TEndpointProvider, TTokenProvider } from '../../../src/core/types.ts'
 import { makeBootstrap, makeBreaker, makeSystem } from '../../helpers/factories.ts'
 import { setupAPISpies } from '../../helpers/mocks/api.mock.js'
@@ -7,7 +7,7 @@ import { setupAPISpies } from '../../helpers/mocks/api.mock.js'
 const endpointProvider: TEndpointProvider = { getApiBase: () => 'https://api.test' }
 const tokenProvider: TTokenProvider = { getToken: async () => 'token-123' }
 
-describe('OpenFuse.getBreaker', () => {
+describe('Openfuse.getBreaker', () => {
   let mockAPI: ReturnType<typeof setupAPISpies>
 
   beforeEach(() => {
@@ -30,7 +30,7 @@ describe('OpenFuse.getBreaker', () => {
 
       mockAPI.breakers.getBreaker.mockResolvedValue(breaker)
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -70,7 +70,7 @@ describe('OpenFuse.getBreaker', () => {
       mockAPI.breakers.listBreakers.mockResolvedValue([breaker])
       mockAPI.breakers.getBreaker.mockResolvedValue(breaker)
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -113,7 +113,7 @@ describe('OpenFuse.getBreaker', () => {
       mockAPI.breakers.listBreakers.mockResolvedValue([breaker])
       mockAPI.breakers.getBreaker.mockResolvedValue(breaker)
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -142,7 +142,7 @@ describe('OpenFuse.getBreaker', () => {
       )
       mockAPI.breakers.getBreaker.mockResolvedValue(breaker)
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -167,7 +167,7 @@ describe('OpenFuse.getBreaker', () => {
       )
       mockAPI.breakers.getBreaker.mockRejectedValue(new Error('down'))
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -187,7 +187,7 @@ describe('OpenFuse.getBreaker', () => {
       mockAPI.breakers.listBreakers.mockResolvedValue([breaker])
       mockAPI.breakers.getBreaker.mockRejectedValue(new Error('down'))
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },

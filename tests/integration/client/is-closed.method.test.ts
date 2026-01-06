@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { OpenFuse } from '../../../src/client/openfuse.ts'
+import { Openfuse } from '../../../src/client/openfuse.ts'
 import type { TEndpointProvider, TTokenProvider } from '../../../src/core/types.ts'
 import { makeBootstrap, makeBreaker, makeSystem } from '../../helpers/factories.ts'
 import { setupAPISpies } from '../../helpers/mocks/api.mock.ts'
@@ -7,7 +7,7 @@ import { setupAPISpies } from '../../helpers/mocks/api.mock.ts'
 const endpointProvider: TEndpointProvider = { getApiBase: () => 'https://api.test' }
 const tokenProvider: TTokenProvider = { getToken: async () => 'token-123' }
 
-describe('OpenFuse.isClosed', () => {
+describe('Openfuse.isClosed', () => {
   let mockAPI: ReturnType<typeof setupAPISpies>
 
   beforeEach(() => {
@@ -31,7 +31,7 @@ describe('OpenFuse.isClosed', () => {
         makeBreaker({ ...breaker, state: 'closed' }),
       )
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -55,7 +55,7 @@ describe('OpenFuse.isClosed', () => {
         makeBreaker({ ...breaker, state: 'closed' }),
       )
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -84,7 +84,7 @@ describe('OpenFuse.isClosed', () => {
         makeBreaker({ ...breaker, state: 'closed' }),
       )
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -110,7 +110,7 @@ describe('OpenFuse.isClosed', () => {
         makeBreaker({ ...breaker, state: 'closed' }),
       )
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -133,7 +133,7 @@ describe('OpenFuse.isClosed', () => {
       )
       mockAPI.breakers.getBreaker.mockRejectedValueOnce(new Error('down'))
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },

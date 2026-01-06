@@ -1,36 +1,55 @@
-# OpenFuse SDK for Node.js
+# Openfuse SDK for Node.js
 
 **Status:** MVP (read-only). **Zero runtime deps. Node LTS (22+).**
 
 ## Quickstart (Cloud)
 
 ```ts
-import { OpenFuse } from '@openfuse/sdk'
-import { CloudEndpoint } from '@openfuse/sdk/providers/endpoint/cloud-endpoint'
-import { ApiKeySTSProvider } from '@openfuse/sdk/providers/auth/api-key-sts-provider'
+import { OpenfuseCloud } from '@openfuse/sdk'
 
-const openFuse = new OpenFuse({
-  endpointProvider: new CloudEndpoint('us'),
-  tokenProvider: new ApiKeySTSProvider({ apiKey: process.env.OPENFUSE_API_KEY!, region: 'us' }),
-  scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: 'checkout' },
+const client = new OpenfuseCloud({
+  region: 'us',
+  company: 'acme',
+  environment: 'prod',
+  systemSlug: 'checkout',
+  clientId: process.env.OPENFUSE_CLIENT_ID!,
+  clientSecret: process.env.OPENFUSE_CLIENT_SECRET!,
 })
 
-await openFuse.bootstrap() // Optional warm-up
+await client.bootstrap()
 
-const isPaymentOpen = await openFuse.isOpen('payment-gateway')
+const isPaymentOpen = await client.isOpen('payment-gateway')
 
-const result = await openFuse.withBreaker('payment-gateway', () => doPayment(), {
+const result = await client.withBreaker('payment-gateway', () => doPayment(), {
   onOpen: () => useFallback(),
   onUnknown: () => degradeGracefully(),
 })
 ```
 
-## Public API (MVP)
+## Self-hosted / Advanced
 
-- `new OpenFuse({ endpointProvider, tokenProvider, scope })`
-- `bootstrap()`
-- `isOpen(breakerSlug: string)`
-- `getBreaker(breakerSlug: string)`
-- `listBreakers()`
-- `withBreaker(breakerSlug: string, work, { onOpen?, onUnknown?, signal? })`
-- `invalidate({ breakerSlug?, breakerId?, all? })`
+```ts
+import { Openfuse, KeycloakClientCredentialsProvider } from '@openfuse/sdk'
+
+const client = new Openfuse({
+  endpointProvider: { getApiBase: () => 'https://api.mycompany.com/v1' },
+  tokenProvider: new KeycloakClientCredentialsProvider({
+    keycloakUrl: 'https://auth.mycompany.com',
+    realm: 'my-realm',
+    clientId: '...',
+    clientSecret: '...',
+  }),
+  scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: 'checkout' },
+})
+```
+
+## Public API
+
+- `bootstrap()` - Initialize SDK, fetch system config
+- `isOpen(breakerSlug)` - Check if breaker is open
+- `isClosed(breakerSlug)` - Check if breaker is closed
+- `getBreaker(breakerSlug)` - Fetch breaker details
+- `listBreakers()` - List all breakers
+- `withBreaker(slug, fn, options)` - Execute with circuit breaker protection
+- `invalidate()` - Clear cached breaker data
+- `shutdown()` - Graceful shutdown

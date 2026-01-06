@@ -15,7 +15,7 @@ import { SystemsApi } from '../domains/system/system.api.ts'
 import { SystemFeature } from '../domains/system/system.feature.ts'
 import type { TBreaker } from '../types/api.ts'
 
-type TOpenFuseOptions = {
+type TOpenfuseOptions = {
   endpointProvider: TEndpointProvider
   tokenProvider: TTokenProvider
   scope: TCompanyEnvironmentSystemScope
@@ -39,10 +39,11 @@ type TWithBreakerOptions<T> = {
   onOpen?: () => Promise<T> | T
   /** Fallback if the breaker state is unknown (e.g., network failure fetching state). */
   onUnknown?: () => Promise<T> | T
+  /** AbortSignal for cancellation. */
   signal?: AbortSignal
 }
 
-export class OpenFuse {
+export class Openfuse {
   private transport: Transport
   private systemFeature: SystemFeature
   private breakersFeature: BreakersFeature
@@ -51,7 +52,7 @@ export class OpenFuse {
   private readonly metricsApi: MetricsApi
   private readonly metricsConfig?: Partial<TMetricsConfig>
 
-  constructor(options: TOpenFuseOptions) {
+  constructor(options: TOpenfuseOptions) {
     this.instanceId = options.instanceId ?? generateInstanceId()
     this.metricsConfig = options.metrics
 
@@ -189,14 +190,12 @@ export class OpenFuse {
 
   /** Clear cached breaker data. Call after external changes to breaker configuration. */
   public async invalidate(): Promise<void> {
-    // Flush and stop old metrics worker before recreating
     await this.metricsFeature.flush()
     this.metricsFeature.stop()
 
     const breakersApi = new BreakersApi({ transport: this.transport })
     this.breakersFeature = new BreakersFeature({ api: breakersApi })
 
-    // Recreate metrics feature with new breakers reference
     this.metricsFeature = new MetricsFeature({
       api: this.metricsApi,
       breakersFeature: this.breakersFeature,
