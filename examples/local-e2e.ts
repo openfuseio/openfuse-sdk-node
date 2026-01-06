@@ -1,211 +1,152 @@
 /**
- * E2E test script for local development.
+ * E2E test script.
  *
- * Prerequisites:
- * 1. Run `docker compose up` in openfuse-cloud
- * 2. Create a company, environment, system, and breaker via the API/UI
- * 3. Set the environment variables below
+ * Local development:
+ *   OPENFUSE_CLIENT_SECRET=secret OPENFUSE_LOCAL=1 pnpm e2e:local
  *
- * Usage:
- *   npx tsx examples/local-e2e.ts
+ * Cloud:
+ *   OPENFUSE_CLIENT_SECRET=secret pnpm e2e:local
  */
 
-import { OpenFuse } from '../src/client/openfuse.ts'
-import type { TEndpointProvider, TTokenProvider } from '../src/core/types.ts'
+if (process.env.OPENFUSE_LOCAL === '1') {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
+}
+
+import {
+  Openfuse,
+  OpenfuseCloud,
+  KeycloakClientCredentialsProvider,
+  type TRegion,
+} from '../src/index.ts'
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Configuration - update these for your local setup
+// Configuration
 // ─────────────────────────────────────────────────────────────────────────────
+
+const isLocal = process.env.OPENFUSE_LOCAL === '1'
 
 const CONFIG = {
-  // API endpoint (environment-scoped URL pattern: env-slug--company-slug.api.openfuse.io)
-  // For local: use lvh.me which resolves to 127.0.0.1
-  // Include /v1 for the API version prefix
-  apiBase: process.env.OPENFUSE_API_BASE ?? 'https://prod--acme.api.lvh.me:3000/v1',
+  region: (process.env.OPENFUSE_REGION ?? 'us') as TRegion,
+  company: process.env.OPENFUSE_COMPANY ?? 'acme',
+  environment: process.env.OPENFUSE_ENVIRONMENT ?? 'prod',
+  systemSlug: process.env.OPENFUSE_SYSTEM ?? 'system',
+  clientId: process.env.OPENFUSE_CLIENT_ID ?? 'tzxcvw0e-clp0cabe-e2e-test-sdk',
+  clientSecret: process.env.OPENFUSE_CLIENT_SECRET ?? '',
+  breakerSlug: process.env.OPENFUSE_BREAKER ?? 'stripe-payment-processor',
+}
 
-  // Keycloak configuration
-  // Default values match local docker-compose setup
+const LOCAL_CONFIG = {
+  apiBase: process.env.OPENFUSE_API_BASE ?? 'https://prod--acme.api.lvh.me:3000/v1',
   keycloakUrl: process.env.KEYCLOAK_URL ?? 'http://localhost:8080',
   keycloakRealm: process.env.KEYCLOAK_REALM ?? 'local-openfuse-tenants',
-  // Client ID pattern: {realm-name}-sdk-client
-  keycloakClientId: process.env.KEYCLOAK_CLIENT_ID ?? 'tzxcvw0e-clp0cabe-e2e-test-sdk',
-  // Get this from KC_TENANTS_SDK_CLIENT_SECRET in your .env
-  keycloakClientSecret: process.env.KEYCLOAK_CLIENT_SECRET ?? '',
-
-  // Your test data
-  companySlug: process.env.COMPANY_SLUG ?? 'acme',
-  environmentSlug: process.env.ENVIRONMENT_SLUG ?? 'prod',
-  systemSlug: process.env.SYSTEM_SLUG ?? 'system',
-  breakerSlug: process.env.BREAKER_SLUG ?? 'stripe-payment-processor',
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Local providers
-// ─────────────────────────────────────────────────────────────────────────────
-
-class LocalEndpointProvider implements TEndpointProvider {
-  private apiBase: string
-
-  constructor(apiBase: string) {
-    this.apiBase = apiBase
-  }
-
-  getApiBase(): string {
-    return this.apiBase
-  }
-}
-
-class KeycloakTokenProvider implements TTokenProvider {
-  private cachedToken?: { token: string; expiresAt: number }
-  private keycloakUrl: string
-  private realm: string
-  private clientId: string
-  private clientSecret: string
-
-  constructor(keycloakUrl: string, realm: string, clientId: string, clientSecret: string) {
-    this.keycloakUrl = keycloakUrl
-    this.realm = realm
-    this.clientId = clientId
-    this.clientSecret = clientSecret
-  }
-
-  async getToken(): Promise<string> {
-    if (this.cachedToken && Date.now() < this.cachedToken.expiresAt - 30_000) {
-      return this.cachedToken.token
-    }
-
-    const tokenUrl = `${this.keycloakUrl}/realms/${this.realm}/protocol/openid-connect/token`
-
-    const response = await fetch(tokenUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: this.clientId,
-        client_secret: this.clientSecret,
-      }),
-    })
-
-    if (!response.ok) {
-      const text = await response.text()
-      throw new Error(`Keycloak token error: ${response.status} - ${text}`)
-    }
-
-    const data = (await response.json()) as { access_token: string; expires_in: number }
-    this.cachedToken = {
-      token: data.access_token,
-      expiresAt: Date.now() + data.expires_in * 1000,
-    }
-
-    return this.cachedToken.token
-  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────────────────────────────────────
 
+function createClient(): Openfuse {
+  if (isLocal) {
+    return new Openfuse({
+      endpointProvider: { getApiBase: () => LOCAL_CONFIG.apiBase },
+      tokenProvider: new KeycloakClientCredentialsProvider({
+        keycloakUrl: LOCAL_CONFIG.keycloakUrl,
+        realm: LOCAL_CONFIG.keycloakRealm,
+        clientId: CONFIG.clientId,
+        clientSecret: CONFIG.clientSecret,
+      }),
+      scope: {
+        companySlug: CONFIG.company,
+        environmentSlug: CONFIG.environment,
+        systemSlug: CONFIG.systemSlug,
+      },
+      metrics: { windowSizeMs: 5_000, flushIntervalMs: 10_000 },
+    })
+  }
+
+  return new OpenfuseCloud({
+    region: CONFIG.region,
+    company: CONFIG.company,
+    environment: CONFIG.environment,
+    systemSlug: CONFIG.systemSlug,
+    clientId: CONFIG.clientId,
+    clientSecret: CONFIG.clientSecret,
+    metrics: { windowSizeMs: 5_000, flushIntervalMs: 10_000 },
+  })
+}
+
 async function main() {
-  console.log('🚀 OpenFuse SDK E2E Test')
-  console.log('─'.repeat(50))
-  console.log(`API Base: ${CONFIG.apiBase}`)
-  console.log(`Company: ${CONFIG.companySlug}`)
-  console.log(`Environment: ${CONFIG.environmentSlug}`)
+  console.log('Openfuse SDK E2E Test')
+  console.log('-'.repeat(50))
+  console.log(`Mode: ${isLocal ? 'LOCAL' : 'CLOUD'}`)
+  if (isLocal) console.log(`API Base: ${LOCAL_CONFIG.apiBase}`)
+  else console.log(`Region: ${CONFIG.region}`)
+  console.log(`Company: ${CONFIG.company}`)
+  console.log(`Environment: ${CONFIG.environment}`)
   console.log(`System: ${CONFIG.systemSlug}`)
   console.log(`Breaker: ${CONFIG.breakerSlug}`)
-  console.log('─'.repeat(50))
+  console.log('-'.repeat(50))
 
-  if (!CONFIG.keycloakClientSecret) {
-    console.error('❌ KEYCLOAK_CLIENT_SECRET environment variable is required')
-    console.error('   Use the value of KC_TENANTS_SDK_CLIENT_SECRET from openfuse-cloud/.env')
-    console.error('')
-    console.error('   Example:')
-    console.error('     KEYCLOAK_CLIENT_SECRET=your-secret npx tsx examples/local-e2e.ts')
+  if (!CONFIG.clientSecret) {
+    console.error('OPENFUSE_CLIENT_SECRET environment variable is required')
     process.exit(1)
   }
 
-  const endpointProvider = new LocalEndpointProvider(CONFIG.apiBase)
-  const tokenProvider = new KeycloakTokenProvider(
-    CONFIG.keycloakUrl,
-    CONFIG.keycloakRealm,
-    CONFIG.keycloakClientId,
-    CONFIG.keycloakClientSecret,
-  )
+  const client = createClient()
 
-  const client = new OpenFuse({
-    endpointProvider,
-    tokenProvider,
-    scope: {
-      companySlug: CONFIG.companySlug,
-      environmentSlug: CONFIG.environmentSlug,
-      systemSlug: CONFIG.systemSlug,
-    },
-    metrics: {
-      windowSizeMs: 5_000, // 5 second windows for faster testing
-      flushIntervalMs: 10_000,
-    },
-  })
+  console.log(`\nInstance ID: ${client.getInstanceId()}`)
 
-  console.log(`\n📡 Instance ID: ${client.getInstanceId()}`)
-
-  // Bootstrap
-  console.log('\n⏳ Bootstrapping...')
+  console.log('\nBootstrapping...')
   await client.bootstrap()
-  console.log('✅ Bootstrap complete')
+  console.log('Bootstrap complete')
 
-  // List breakers
-  console.log('\n📋 Listing breakers...')
+  console.log('\nListing breakers...')
   const breakers = await client.listBreakers()
-  console.log(`   Found ${breakers.length} breaker(s):`)
+  console.log(`Found ${breakers.length} breaker(s):`)
   for (const b of breakers) {
-    console.log(`   - ${b.slug} (${b.state})`)
+    console.log(`  - ${b.slug} (${b.state})`)
   }
 
-  // Test withBreaker - success
-  console.log(`\n🔒 Testing withBreaker (${CONFIG.breakerSlug}) - SUCCESS case...`)
+  console.log(`\nTesting withBreaker (${CONFIG.breakerSlug}) - SUCCESS case...`)
   const result1 = await client.withBreaker(CONFIG.breakerSlug, async () => {
-    await sleep(50) // Simulate some work
+    await sleep(50)
     return { status: 'ok', data: 'payment processed' }
   })
-  console.log(`   Result: ${JSON.stringify(result1)}`)
+  console.log(`Result: ${JSON.stringify(result1)}`)
 
-  // Test withBreaker - failure
-  console.log(`\n🔒 Testing withBreaker (${CONFIG.breakerSlug}) - FAILURE case...`)
+  console.log(`\nTesting withBreaker (${CONFIG.breakerSlug}) - FAILURE case...`)
   try {
     await client.withBreaker(CONFIG.breakerSlug, async () => {
       await sleep(30)
       throw new Error('Payment gateway timeout')
     })
   } catch (err) {
-    console.log(`   Caught expected error: ${(err as Error).message}`)
+    console.log(`Caught expected error: ${(err as Error).message}`)
   }
 
-  // Test withBreaker - timeout
-  console.log(`\n🔒 Testing withBreaker (${CONFIG.breakerSlug}) - TIMEOUT case...`)
+  console.log(`\nTesting withBreaker (${CONFIG.breakerSlug}) - TIMEOUT case...`)
   try {
     await client.withBreaker(
       CONFIG.breakerSlug,
       async () => {
-        await sleep(500) // Will exceed timeout
+        await sleep(500)
         return 'should not reach here'
       },
       { timeout: 100 },
     )
   } catch (err) {
-    console.log(`   Caught expected error: ${(err as Error).name} - ${(err as Error).message}`)
+    console.log(`Caught expected error: ${(err as Error).name} - ${(err as Error).message}`)
   }
 
-  // Wait for metrics window to complete and flush
-  console.log('\n⏳ Waiting for metrics window to complete...')
+  console.log('\nWaiting for metrics window to complete...')
   await sleep(6_000)
 
-  console.log('📤 Flushing metrics...')
+  console.log('Flushing metrics...')
   await client.flushMetrics()
-  console.log('✅ Metrics flushed')
+  console.log('Metrics flushed')
 
-  // Shutdown
   await client.shutdown()
-  console.log('\n✅ Done! Check your API/database for the metrics.')
+  console.log('\nDone!')
 }
 
 function sleep(ms: number): Promise<void> {
@@ -213,6 +154,6 @@ function sleep(ms: number): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error('❌ Error:', err)
+  console.error('Error:', err)
   process.exit(1)
 })

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { OpenFuse } from '../../../src/client/openfuse.ts'
+import { Openfuse } from '../../../src/client/openfuse.ts'
 import type { TEndpointProvider, TTokenProvider } from '../../../src/core/types.ts'
 import { makeBreaker, makeSystem } from '../../helpers/factories.ts'
 import { setupAPISpies } from '../../helpers/mocks/api.mock.ts'
@@ -7,7 +7,7 @@ import { setupAPISpies } from '../../helpers/mocks/api.mock.ts'
 const endpointProvider: TEndpointProvider = { getApiBase: () => 'https://api.test' }
 const tokenProvider: TTokenProvider = { getToken: async () => 'token-123' }
 
-describe('OpenFuse.listBreakers', () => {
+describe('Openfuse.listBreakers', () => {
   let mockAPI: ReturnType<typeof setupAPISpies>
 
   beforeEach(() => {
@@ -26,7 +26,7 @@ describe('OpenFuse.listBreakers', () => {
       mockAPI.systems.getSystemBySlug.mockResolvedValueOnce(system)
       mockAPI.breakers.listBreakers.mockResolvedValueOnce([breaker])
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -45,7 +45,7 @@ describe('OpenFuse.listBreakers', () => {
       mockAPI.systems.getSystemBySlug.mockResolvedValue(system)
       mockAPI.breakers.listBreakers.mockResolvedValueOnce([a]).mockResolvedValueOnce([b])
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },

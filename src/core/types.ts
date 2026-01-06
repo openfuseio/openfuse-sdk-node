@@ -1,4 +1,4 @@
-export type TRegion = 'us' | 'eu' | 'sa'
+export type TRegion = 'us'
 
 export type TEndpointProvider = {
   /** Returns the API base URL such as https://api.us.openfuse.io */
@@ -8,10 +8,12 @@ export type TEndpointProvider = {
 export type TTokenProvider = {
   /** Returns a bearer token. Implementations may cache and rotate tokens. */
   getToken(signal?: AbortSignal): Promise<string>
+  /** Clears any cached token, forcing the next getToken() to fetch fresh. */
+  clearCache?(): void
 }
 
 export type TCompanyEnvironmentSystemScope = {
-  /** Company slug configured in the OpenFuse Cloud */
+  /** Company slug configured in the Openfuse Cloud */
   companySlug: string
   /** Environment slug under the company */
   environmentSlug: string

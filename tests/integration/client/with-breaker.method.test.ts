@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { OpenFuse } from '../../../src/client/openfuse.ts'
+import { Openfuse } from '../../../src/client/openfuse.ts'
 import { CircuitOpenError, TimeoutError } from '../../../src/core/errors.ts'
 import type { TEndpointProvider, TTokenProvider } from '../../../src/core/types.ts'
 import type { TIngestMetricsRequest } from '../../../src/domains/metrics/types.ts'
@@ -14,7 +14,7 @@ import { setupAPISpies } from '../../helpers/mocks/api.mock.ts'
 const endpointProvider: TEndpointProvider = { getApiBase: () => 'https://api.test' }
 const tokenProvider: TTokenProvider = { getToken: async () => 'token-123' }
 
-describe('OpenFuse.withBreaker (enterprise semantics)', () => {
+describe('Openfuse.withBreaker (enterprise semantics)', () => {
   let mockAPI: ReturnType<typeof setupAPISpies>
 
   beforeEach(() => {
@@ -36,7 +36,7 @@ describe('OpenFuse.withBreaker (enterprise semantics)', () => {
       )
       mockAPI.breakers.getBreaker.mockResolvedValue(breaker)
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -63,7 +63,7 @@ describe('OpenFuse.withBreaker (enterprise semantics)', () => {
       )
       mockAPI.breakers.getBreaker.mockResolvedValue(breaker)
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -91,7 +91,7 @@ describe('OpenFuse.withBreaker (enterprise semantics)', () => {
       )
       mockAPI.breakers.getBreaker.mockResolvedValue(makeBreaker({ state: 'open' }))
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -117,7 +117,7 @@ describe('OpenFuse.withBreaker (enterprise semantics)', () => {
       )
       mockAPI.breakers.getBreaker.mockResolvedValue(makeBreaker({ state: 'open' }))
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -145,7 +145,7 @@ describe('OpenFuse.withBreaker (enterprise semantics)', () => {
       )
       mockAPI.breakers.getBreaker.mockResolvedValue(makeBreaker({ state: 'open' }))
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -180,7 +180,7 @@ describe('OpenFuse.withBreaker (enterprise semantics)', () => {
       )
       mockAPI.breakers.getBreaker.mockRejectedValue(new Error('state down'))
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -206,7 +206,7 @@ describe('OpenFuse.withBreaker (enterprise semantics)', () => {
       )
       mockAPI.breakers.getBreaker.mockRejectedValue(new Error('state down'))
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -232,7 +232,7 @@ describe('OpenFuse.withBreaker (enterprise semantics)', () => {
       )
       mockAPI.breakers.getBreaker.mockRejectedValue(new Error('state down'))
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -255,7 +255,7 @@ describe('OpenFuse.withBreaker (enterprise semantics)', () => {
       )
       mockAPI.breakers.getBreaker.mockResolvedValue(makeBreaker({ state: 'closed' }))
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -289,7 +289,7 @@ describe('OpenFuse.withBreaker (enterprise semantics)', () => {
       )
       mockAPI.breakers.getBreaker.mockResolvedValue(makeBreaker({ state: 'closed' }))
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -318,7 +318,7 @@ describe('OpenFuse.withBreaker (enterprise semantics)', () => {
       )
       mockAPI.breakers.getBreaker.mockResolvedValue(makeBreaker({ state: 'closed' }))
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -348,7 +348,7 @@ describe('OpenFuse.withBreaker (enterprise semantics)', () => {
       )
       mockAPI.breakers.getBreaker.mockResolvedValue(makeBreaker({ state: 'closed' }))
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -370,7 +370,7 @@ describe('OpenFuse.withBreaker (enterprise semantics)', () => {
       mockAPI.breakers.listBreakers.mockResolvedValue([breaker])
       mockAPI.breakers.getBreaker.mockResolvedValue(makeBreaker({ state: 'closed' }))
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -397,7 +397,7 @@ describe('OpenFuse.withBreaker (enterprise semantics)', () => {
         return breaker
       })
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -432,7 +432,7 @@ describe('OpenFuse.withBreaker (enterprise semantics)', () => {
       mockAPI.metrics.listMetrics.mockResolvedValue(STANDARD_METRIC_DEFINITIONS)
       mockAPI.metrics.ingest.mockResolvedValue({ accepted: 1, duplicates: 0 })
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -478,7 +478,7 @@ describe('OpenFuse.withBreaker (enterprise semantics)', () => {
       mockAPI.metrics.listMetrics.mockResolvedValue(STANDARD_METRIC_DEFINITIONS)
       mockAPI.metrics.ingest.mockResolvedValue({ accepted: 1, duplicates: 0 })
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -523,7 +523,7 @@ describe('OpenFuse.withBreaker (enterprise semantics)', () => {
       mockAPI.metrics.listMetrics.mockResolvedValue(STANDARD_METRIC_DEFINITIONS)
       mockAPI.metrics.ingest.mockResolvedValue({ accepted: 1, duplicates: 0 })
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -570,7 +570,7 @@ describe('OpenFuse.withBreaker (enterprise semantics)', () => {
       mockAPI.metrics.listMetrics.mockResolvedValue(STANDARD_METRIC_DEFINITIONS)
       mockAPI.metrics.ingest.mockResolvedValue({ accepted: 1, duplicates: 0 })
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -614,7 +614,7 @@ describe('OpenFuse.withBreaker (enterprise semantics)', () => {
       mockAPI.metrics.listMetrics.mockResolvedValue(STANDARD_METRIC_DEFINITIONS)
       mockAPI.metrics.ingest.mockResolvedValue({ accepted: 1, duplicates: 0 })
 
-      const client = new OpenFuse({
+      const client = new Openfuse({
         endpointProvider,
         tokenProvider,
         scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },

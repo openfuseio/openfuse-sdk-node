@@ -1,13 +1,20 @@
 // ================================================================
-// OpenFuse SDK for Node.js
+// Openfuse SDK for Node.js
 // ================================================================
 
-// Main client
-export { OpenFuse } from './client/openfuse.ts'
+// Main clients
+export { OpenfuseCloud } from './client/openfuse-cloud.ts'
+export type { TOpenfuseCloudOptions } from './client/openfuse-cloud.ts'
+export { Openfuse } from './client/openfuse.ts'
 
-// Providers
+// Providers - Endpoints (for self-hosted / advanced usage)
 export { CloudEndpoint } from './providers/endpoint/cloud-endpoint.ts'
-export { ApiKeySTSProvider } from './providers/auth/api-key-sts-provider.ts'
+
+// Providers - Authentication (for self-hosted / advanced usage)
+export { CloudAuth } from './providers/auth/cloud-auth.ts'
+export type { TCloudAuthOptions } from './providers/auth/cloud-auth.ts'
+export { KeycloakClientCredentialsProvider } from './providers/auth/keycloak-client-credentials.ts'
+export type { TKeycloakClientCredentialsOptions } from './providers/auth/keycloak-client-credentials.ts'
 
 // Errors
 export {

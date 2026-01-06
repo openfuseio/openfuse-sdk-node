@@ -105,6 +105,7 @@ export class Transport {
 
     try {
       let lastError: unknown
+      let hasRetriedAuth = false
       for (let attemptIndex = 0; attemptIndex < this.retryPolicy.attempts; attemptIndex++) {
         try {
           const bearerToken: string = await this.tokenProvider.getToken(combinedSignal)
@@ -121,6 +122,11 @@ export class Transport {
           } as RequestInit)
 
           if (httpResponse.status === 401 || httpResponse.status === 403) {
+            if (!hasRetriedAuth) {
+              hasRetriedAuth = true
+              this.tokenProvider.clearCache?.()
+              continue
+            }
             throw new AuthError(`Authentication failed with status ${httpResponse.status}`)
           }
 

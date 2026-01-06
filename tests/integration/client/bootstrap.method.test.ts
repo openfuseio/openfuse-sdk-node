@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { OpenFuse } from '../../../src/client/openfuse.ts'
+import { Openfuse } from '../../../src/client/openfuse.ts'
 import { AuthError } from '../../../src/core/errors.ts'
 import type { TEndpointProvider, TTokenProvider } from '../../../src/core/types.ts'
 import { makeBootstrap, makeBreaker, makeSystem } from '../../helpers/factories.ts'
@@ -8,7 +8,7 @@ import { setupAPISpies } from '../../helpers/mocks/api.mock.ts'
 const endpointProvider: TEndpointProvider = { getApiBase: () => 'https://api.test' }
 const tokenProvider: TTokenProvider = { getToken: async () => 'token-123' }
 
-describe('OpenFuse.bootstrap', () => {
+describe('Openfuse.bootstrap', () => {
   let mockAPI: ReturnType<typeof setupAPISpies>
 
   beforeEach(() => {
@@ -24,7 +24,7 @@ describe('OpenFuse.bootstrap', () => {
     mockAPI.systems.getSystemBySlug.mockResolvedValueOnce(system)
     mockAPI.systems.bootstrapSystem.mockResolvedValueOnce(makeBootstrap({ system, breakers: [] }))
 
-    const client = new OpenFuse({
+    const client = new Openfuse({
       endpointProvider,
       tokenProvider,
       scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -46,7 +46,7 @@ describe('OpenFuse.bootstrap', () => {
     )
     mockAPI.breakers.getBreaker.mockResolvedValue(makeBreaker(breaker))
 
-    const client = new OpenFuse({
+    const client = new Openfuse({
       endpointProvider,
       tokenProvider,
       scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -70,7 +70,7 @@ describe('OpenFuse.bootstrap', () => {
     )
     mockAPI.breakers.getBreaker.mockResolvedValue(makeBreaker(breaker))
 
-    const client = new OpenFuse({
+    const client = new Openfuse({
       endpointProvider,
       tokenProvider,
       scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -95,7 +95,7 @@ describe('OpenFuse.bootstrap', () => {
     mockAPI.breakers.listBreakers.mockResolvedValue([breaker])
     mockAPI.breakers.getBreaker.mockResolvedValue(makeBreaker(breaker))
 
-    const client = new OpenFuse({
+    const client = new Openfuse({
       endpointProvider,
       tokenProvider,
       scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -121,7 +121,7 @@ describe('OpenFuse.bootstrap', () => {
 
     mockAPI.breakers.getBreaker.mockResolvedValue(makeBreaker(breaker))
 
-    const client = new OpenFuse({
+    const client = new Openfuse({
       endpointProvider,
       tokenProvider,
       scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -147,7 +147,7 @@ describe('OpenFuse.bootstrap', () => {
     )
     mockAPI.breakers.getBreaker.mockResolvedValue(makeBreaker(b2))
 
-    const client = new OpenFuse({
+    const client = new Openfuse({
       endpointProvider,
       tokenProvider,
       scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -165,7 +165,7 @@ describe('OpenFuse.bootstrap', () => {
     mockAPI.systems.getSystemBySlug.mockResolvedValueOnce(system)
     mockAPI.systems.bootstrapSystem.mockRejectedValueOnce(new AuthError('nope'))
 
-    const client = new OpenFuse({
+    const client = new Openfuse({
       endpointProvider,
       tokenProvider,
       scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -188,7 +188,7 @@ describe('OpenFuse.bootstrap', () => {
       return makeBreaker(breaker)
     })
 
-    const client = new OpenFuse({
+    const client = new Openfuse({
       endpointProvider,
       tokenProvider,
       scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
@@ -214,7 +214,7 @@ describe('OpenFuse.bootstrap', () => {
     )
     mockAPI.breakers.getBreaker.mockResolvedValueOnce(makeBreaker(breaker))
 
-    const client = new OpenFuse({
+    const client = new Openfuse({
       endpointProvider,
       tokenProvider,
       scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
