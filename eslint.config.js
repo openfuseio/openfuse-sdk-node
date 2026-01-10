@@ -20,7 +20,7 @@ const commonTSConfig = {
 export default [
   /* ---------- Global ignores ---------- */
   {
-    ignores: ['tsup.config.ts', 'dist/**'],
+    ignores: ['tsup.config.ts', 'vitest.config.ts', 'vitest.config.e2e.ts', 'dist/**'],
   },
   /* -------- TypeScript test files ------- */
   {

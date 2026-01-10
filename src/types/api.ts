@@ -4,8 +4,7 @@ export type TBreaker = {
   id: string
   slug: string
   state: TBreakerStateValue
-  updated_at?: string
-  version?: number
+  updatedAt?: string
 }
 
 export type TBootstrapResponse = {
@@ -15,6 +14,5 @@ export type TBootstrapResponse = {
 
 export type TBreakerStateResponse = {
   state: TBreakerStateValue
-  updated_at?: string
-  version?: number
+  updatedAt?: string
 }
