@@ -42,7 +42,9 @@ export function hasFailureRateFixtures(): boolean {
 
 export function getFailureRateFixtures(): TRequiredFixtureConfig {
   if (!hasFailureRateFixtures()) {
-    throw new Error('Failure-rate fixtures not configured. Check E2E_FIXTURE_* environment variables.')
+    throw new Error(
+      'Failure-rate fixtures not configured. Check E2E_FIXTURE_* environment variables.',
+    )
   }
   return E2E_FIXTURES.failureRate as TRequiredFixtureConfig
 }
@@ -53,7 +55,9 @@ export function hasLatencyFixtures(): boolean {
 
 export function getLatencyFixtures(): TRequiredFixtureConfig {
   if (!hasLatencyFixtures()) {
-    throw new Error('Latency fixtures not configured. Check E2E_FIXTURE_LATENCY_* environment variables.')
+    throw new Error(
+      'Latency fixtures not configured. Check E2E_FIXTURE_LATENCY_* environment variables.',
+    )
   }
   return E2E_FIXTURES.latency as TRequiredFixtureConfig
 }
