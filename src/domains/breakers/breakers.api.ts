@@ -5,7 +5,6 @@ export type TBreakersApiOptions = {
   transport: Transport
 }
 
-/** Thin HTTP client over the breakers endpoints. No caching or extra logic. */
 export interface TBreakersApi {
   listBreakers(systemId: string, signal?: AbortSignal): Promise<TBreaker[]>
   getBreaker(systemId: string, breakerId: string, signal?: AbortSignal): Promise<TBreaker>
