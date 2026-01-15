@@ -26,20 +26,18 @@ const client = new OpenfuseCloud({
   company: 'acme',
   environment: 'prod',
   systemSlug: 'checkout',
-  clientId: process.env.OPENFUSE_CLIENT_ID ?? '',
-  clientSecret: process.env.OPENFUSE_CLIENT_SECRET ?? '',
+  clientId: 'your-client-id',
+  clientSecret: 'your-client-secret',
 })
 
 await client.bootstrap()
 
-const recommendations = await client.withBreaker(
-  'recommendations-service',
-  () => fetchRecommendations(userId),
+const recommendations = await client.withBreaker('recommendations-service', () => fetchRecommendations(userId),
   { onOpen: () => [] },
 )
 ```
 
-If `recommendations-service` is open, `onOpen` returns an empty array immediately, no network call attempted.
+If `recommendations-service` breaker is open, `onOpen` returns an empty array immediately, no network call attempted.
 
 ## Circuit Breaker States
 
@@ -90,8 +88,8 @@ const client = new Openfuse({
   tokenProvider: new KeycloakClientCredentialsProvider({
     keycloakUrl: 'https://auth.mycompany.com',
     realm: 'openfuse',
-    clientId: process.env.OPENFUSE_CLIENT_ID ?? '',
-    clientSecret: process.env.OPENFUSE_CLIENT_SECRET ?? '',
+    clientId: 'your-client-id',
+    clientSecret: 'your-client-secret',
   }),
   scope: {
     companySlug: 'mycompany',
