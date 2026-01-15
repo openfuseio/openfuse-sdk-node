@@ -1,8 +1,26 @@
 {
   "name": "@openfuse/sdk",
   "version": "0.1.0",
-  "description": "OpenFuse SDK for Node.js (thin, zero-deps)",
-  "license": "Apache-2.0",
+  "description": "Openfuse SDK for Node.js - Circuit breaker management with zero runtime dependencies",
+  "license": "Elastic-2.0",
+  "author": "Openfuse <rodrigo@openfuse.io>",
+  "homepage": "https://openfuse.io",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/openfuseio/openfuse-sdk-node.git"
+  },
+  "bugs": {
+    "url": "https://github.com/openfuseio/openfuse-sdk-node/issues"
+  },
+  "keywords": [
+    "openfuse",
+    "circuit-breaker",
+    "breaker",
+    "timeout",
+    "chaos",
+    "resilience",
+    "sdk"
+  ],
   "type": "module",
   "packageManager": "pnpm@10.10.0",
   "engines": {

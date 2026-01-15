@@ -9,7 +9,7 @@ type TCloudEndpointOptions = {
 export class CloudEndpoint implements TEndpointProvider {
   private apiBaseUrl: string
   constructor(options: TCloudEndpointOptions) {
-    const subdomain = `${options.environment}--${options.company}`
+    const subdomain = `${options.environment}-${options.company}`
     this.apiBaseUrl = `https://${subdomain}.api.openfuse.io`
   }
 

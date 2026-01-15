@@ -1,7 +1,3 @@
-// ================================================================
-// Openfuse SDK for Node.js
-// ================================================================
-
 // Main clients
 export { OpenfuseCloud } from './client/openfuse-cloud.ts'
 export type { TOpenfuseCloudOptions } from './client/openfuse-cloud.ts'

@@ -1,6 +1,3 @@
-// TODO: Create common SDKError class
-// TODO: Convert constructor message to object
-
 /** Indicates a configuration problem detected at construction time or during method validation. */
 export class ConfigurationError extends Error {
   constructor(message: string) {

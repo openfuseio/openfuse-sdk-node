@@ -11,22 +11,6 @@ type PlatformConfig = {
   extract?: () => string | null
 }
 
-/**
- * Platform detection configurations.
- * Order matters: more specific platforms should come first.
- *
- * Sources:
- * - AWS ECS: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-metadata-endpoint-v4.html
- * - AWS Lambda: https://docs.aws.amazon.com/lambda/latest/dg/configuration-envvars.html
- * - Kubernetes: https://kubernetes.io/docs/tasks/inject-data-application/environment-variable-expose-pod-information/
- * - Cloud Run: https://cloud.google.com/run/docs/container-contract
- * - Azure Container Apps: https://learn.microsoft.com/en-us/azure/container-apps/environment-variables
- * - Azure Functions: https://learn.microsoft.com/en-us/azure/app-service/reference-app-settings
- * - Fly.io: https://fly.io/docs/machines/runtime-environment/
- * - Railway: https://docs.railway.com/reference/variables
- * - Render: https://render.com/docs/environment-variables
- * - Heroku: https://devcenter.heroku.com/articles/dyno-metadata
- */
 const PLATFORMS: PlatformConfig[] = [
   {
     prefix: 'lambda',

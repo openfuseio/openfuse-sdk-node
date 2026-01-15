@@ -1,8 +1,22 @@
 # Openfuse SDK for Node.js
 
-**Status:** MVP (read-only). **Zero runtime deps. Node LTS (22+).**
+[![npm version](https://img.shields.io/npm/v/@openfuse/sdk.svg)](https://www.npmjs.com/package/@openfuse/sdk)
+[![License](https://img.shields.io/badge/License-Elastic%202.0-blue.svg)](https://www.elastic.co/licensing/elastic-license)
 
-## Quickstart (Cloud)
+Node.js client for the Openfuse circuit breaker service. Zero runtime dependencies.
+
+## Installation
+
+```bash
+npm install @openfuse/sdk
+```
+
+## Requirements
+
+- Node.js >= 22.0.0
+- [Openfuse account](https://openfuse.io) with an SDK client configured
+
+## Usage
 
 ```ts
 import { OpenfuseCloud } from '@openfuse/sdk'
@@ -12,44 +26,81 @@ const client = new OpenfuseCloud({
   company: 'acme',
   environment: 'prod',
   systemSlug: 'checkout',
-  clientId: process.env.OPENFUSE_CLIENT_ID!,
-  clientSecret: process.env.OPENFUSE_CLIENT_SECRET!,
+  clientId: process.env.OPENFUSE_CLIENT_ID ?? '',
+  clientSecret: process.env.OPENFUSE_CLIENT_SECRET ?? '',
 })
 
 await client.bootstrap()
 
-const isPaymentOpen = await client.isOpen('payment-gateway')
+const recommendations = await client.withBreaker(
+  'recommendations-service',
+  () => fetchRecommendations(userId),
+  { onOpen: () => [] },
+)
+```
 
-const result = await client.withBreaker('payment-gateway', () => doPayment(), {
-  onOpen: () => useFallback(),
-  onUnknown: () => degradeGracefully(),
+If `recommendations-service` is open, `onOpen` returns an empty array immediately, no network call attempted.
+
+## Circuit Breaker States
+
+- **Closed** — Requests flow through normally
+- **Open** — Requests blocked, fallback triggered
+- **Half-Open** — Probe requests allowed to test recovery
+
+## API Reference
+
+### Core Methods
+
+| Method                        | Description                                           |
+| ----------------------------- | ----------------------------------------------------- |
+| `bootstrap()`                 | Fetch breaker configuration. Call once at startup.    |
+| `withBreaker(slug, fn, opts)` | Execute function with circuit breaker protection.     |
+| `shutdown()`                  | Flush metrics and clean up. Call before process exit. |
+
+### State Methods
+
+| Method                    | Description                           |
+| ------------------------- | ------------------------------------- |
+| `isOpen(slug, signal?)`   | Returns `true` if breaker is open.    |
+| `isClosed(slug, signal?)` | Returns `true` if breaker is closed.  |
+| `getBreaker(slug)`        | Returns breaker details.              |
+| `listBreakers()`          | Returns all breakers for the system.  |
+| `invalidate()`            | Clear cached state and flush metrics. |
+
+### withBreaker Options
+
+```ts
+await client.withBreaker('my-breaker', () => doSomething(), {
+  onOpen: () => fallbackValue, // Called when breaker is open
+  onUnknown: () => degradedValue, // Called when state can't be determined
+  timeout: 5000, // Timeout in ms for the wrapped function
+  signal: abortController.signal, // AbortSignal for cancellation
 })
 ```
 
-## Self-hosted / Advanced
+## Self-Hosted
 
 ```ts
 import { Openfuse, KeycloakClientCredentialsProvider } from '@openfuse/sdk'
 
 const client = new Openfuse({
-  endpointProvider: { getApiBase: () => 'https://api.mycompany.com/v1' },
+  endpointProvider: {
+    getApiBase: () => 'https://openfuse.internal.mycompany.com/v1',
+  },
   tokenProvider: new KeycloakClientCredentialsProvider({
     keycloakUrl: 'https://auth.mycompany.com',
-    realm: 'my-realm',
-    clientId: '...',
-    clientSecret: '...',
+    realm: 'openfuse',
+    clientId: process.env.OPENFUSE_CLIENT_ID ?? '',
+    clientSecret: process.env.OPENFUSE_CLIENT_SECRET ?? '',
   }),
-  scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: 'checkout' },
+  scope: {
+    companySlug: 'mycompany',
+    environmentSlug: 'prod',
+    systemSlug: 'checkout',
+  },
 })
 ```
 
-## Public API
+## License
 
-- `bootstrap()` - Initialize SDK, fetch system config
-- `isOpen(breakerSlug)` - Check if breaker is open
-- `isClosed(breakerSlug)` - Check if breaker is closed
-- `getBreaker(breakerSlug)` - Fetch breaker details
-- `listBreakers()` - List all breakers
-- `withBreaker(slug, fn, options)` - Execute with circuit breaker protection
-- `invalidate()` - Clear cached breaker data
-- `shutdown()` - Graceful shutdown
+[Elastic License 2.0](LICENSE)
