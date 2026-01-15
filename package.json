@@ -1,5 +1,5 @@
 {
-  "name": "@openfuse/sdk",
+  "name": "@openfuseio/sdk",
   "version": "0.1.0",
   "description": "Openfuse SDK for Node.js - Circuit breaker management with zero runtime dependencies",
   "license": "Elastic-2.0",
