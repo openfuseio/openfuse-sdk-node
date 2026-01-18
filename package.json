@@ -54,6 +54,10 @@
     "prepare": "husky",
     "git:commit": "git-cz"
   },
+  "lint-staged": {
+    "*.{ts,js}": "eslint --fix",
+    "*.{ts,js,json,md}": "prettier --write"
+  },
   "devDependencies": {
     "@commitlint/cli": "^19.8.1",
     "@commitlint/config-conventional": "^19.8.1",

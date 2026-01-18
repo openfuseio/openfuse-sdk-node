@@ -247,10 +247,7 @@ describe('AuthApi', () => {
       })
       await authApi.refreshToken()
 
-      expect(fetchMock).toHaveBeenCalledWith(
-        `${baseUrl}/v1/sdk/auth/token`,
-        expect.anything(),
-      )
+      expect(fetchMock).toHaveBeenCalledWith(`${baseUrl}/v1/sdk/auth/token`, expect.anything())
     })
   })
 })

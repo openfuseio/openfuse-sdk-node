@@ -1,11 +1,7 @@
 import { beforeAll, afterAll } from 'vitest'
 import { Openfuse } from '../../../src/index.ts'
 
-const REQUIRED_ENV_VARS = [
-  'E2E_API_BASE',
-  'E2E_CLIENT_ID',
-  'E2E_CLIENT_SECRET',
-] as const
+const REQUIRED_ENV_VARS = ['E2E_API_BASE', 'E2E_CLIENT_ID', 'E2E_CLIENT_SECRET'] as const
 
 const OPTIONAL_ENV_VARS = [
   'E2E_ADMIN_TOKEN', // Optional: pre-generated admin token for resource management

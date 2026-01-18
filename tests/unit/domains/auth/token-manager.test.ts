@@ -116,9 +116,7 @@ describe('TokenManager', () => {
     it('does not retry on AuthError (invalid credentials)', async () => {
       tokenManager.setToken('old-token', 10)
 
-      vi.mocked(authApi.refreshToken).mockRejectedValueOnce(
-        new AuthError('Invalid credentials'),
-      )
+      vi.mocked(authApi.refreshToken).mockRejectedValueOnce(new AuthError('Invalid credentials'))
 
       await expect(tokenManager.getToken()).rejects.toThrow(AuthError)
       expect(authApi.refreshToken).toHaveBeenCalledTimes(1)
