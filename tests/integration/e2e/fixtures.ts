@@ -1,15 +1,11 @@
 export type TFixtureConfig = {
   systemSlug: string | undefined
-  systemId: string | undefined
   breakerSlug: string | undefined
-  breakerId: string | undefined
 }
 
 export type TRequiredFixtureConfig = {
   systemSlug: string
-  systemId: string
   breakerSlug: string
-  breakerId: string
 }
 
 export type TFixtures = {
@@ -20,20 +16,16 @@ export type TFixtures = {
 export const E2E_FIXTURES: TFixtures = {
   failureRate: {
     systemSlug: process.env.E2E_FIXTURE_SYSTEM_SLUG,
-    systemId: process.env.E2E_FIXTURE_SYSTEM_ID,
     breakerSlug: process.env.E2E_FIXTURE_BREAKER_SLUG,
-    breakerId: process.env.E2E_FIXTURE_BREAKER_ID,
   },
   latency: {
     systemSlug: process.env.E2E_FIXTURE_LATENCY_SYSTEM_SLUG ?? process.env.E2E_FIXTURE_SYSTEM_SLUG,
-    systemId: process.env.E2E_FIXTURE_LATENCY_SYSTEM_ID ?? process.env.E2E_FIXTURE_SYSTEM_ID,
     breakerSlug: process.env.E2E_FIXTURE_LATENCY_BREAKER_SLUG,
-    breakerId: process.env.E2E_FIXTURE_LATENCY_BREAKER_ID,
   },
 }
 
 function isComplete(config: TFixtureConfig): config is TRequiredFixtureConfig {
-  return !!(config.systemSlug && config.systemId && config.breakerSlug && config.breakerId)
+  return !!(config.systemSlug && config.breakerSlug)
 }
 
 export function hasFailureRateFixtures(): boolean {

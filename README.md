@@ -1,6 +1,6 @@
 # Openfuse SDK for Node.js
 
-[![npm version](https://img.shields.io/npm/v/@openfuse/sdk.svg)](https://www.npmjs.com/package/@openfuse/sdk)
+[![npm version](https://img.shields.io/npm/v/@openfuseio/sdk.svg)](https://www.npmjs.com/package/@openfuseio/sdk)
 [![License](https://img.shields.io/badge/License-Elastic%202.0-blue.svg)](https://www.elastic.co/licensing/elastic-license)
 
 Node.js client for the Openfuse circuit breaker service. Zero runtime dependencies.
@@ -8,7 +8,7 @@ Node.js client for the Openfuse circuit breaker service. Zero runtime dependenci
 ## Installation
 
 ```bash
-npm install @openfuse/sdk
+npm install @openfuseio/sdk
 ```
 
 ## Requirements
@@ -19,12 +19,9 @@ npm install @openfuse/sdk
 ## Usage
 
 ```ts
-import { OpenfuseCloud } from '@openfuse/sdk'
+import { OpenfuseCloud } from '@openfuseio/sdk'
 
 const client = new OpenfuseCloud({
-  region: 'us',
-  company: 'acme',
-  environment: 'prod',
   systemSlug: 'checkout',
   clientId: 'your-client-id',
   clientSecret: 'your-client-secret',
@@ -32,12 +29,12 @@ const client = new OpenfuseCloud({
 
 await client.bootstrap()
 
-const recommendations = await client.withBreaker('recommendations-service', () => fetchRecommendations(userId),
+const recommendations = await client.withBreaker('recommendations', () => fetchRecommendations(userId),
   { onOpen: () => [] },
 )
 ```
 
-If `recommendations-service` breaker is open, `onOpen` returns an empty array immediately, no network call attempted.
+If `recommendations` breaker is open, `onOpen` returns an empty array immediately, no network call attempted.
 
 ## Circuit Breaker States
 
@@ -79,24 +76,16 @@ await client.withBreaker('my-breaker', () => doSomething(), {
 ## Self-Hosted
 
 ```ts
-import { Openfuse, KeycloakClientCredentialsProvider } from '@openfuse/sdk'
+import { Openfuse } from '@openfuseio/sdk'
 
 const client = new Openfuse({
-  endpointProvider: {
-    getApiBase: () => 'https://openfuse.internal.mycompany.com/v1',
-  },
-  tokenProvider: new KeycloakClientCredentialsProvider({
-    keycloakUrl: 'https://auth.mycompany.com',
-    realm: 'openfuse',
-    clientId: 'your-client-id',
-    clientSecret: 'your-client-secret',
-  }),
-  scope: {
-    companySlug: 'mycompany',
-    environmentSlug: 'prod',
-    systemSlug: 'checkout',
-  },
+  baseUrl: 'https://openfuse.internal.mycompany.com',
+  systemSlug: 'checkout',
+  clientId: 'your-client-id',
+  clientSecret: 'your-client-secret',
 })
+
+await client.bootstrap()
 ```
 
 ## License

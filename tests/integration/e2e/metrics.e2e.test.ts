@@ -154,23 +154,15 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: metrics - instance ID', () => {
   })
 
   it('should use custom instance ID when provided', async () => {
-    const { Openfuse, KeycloakClientCredentialsProvider } = await import('../../../src/index.ts')
+    const { Openfuse } = await import('../../../src/index.ts')
 
     const customInstanceId = 'custom-test-instance-123'
 
     const client = new Openfuse({
-      endpointProvider: { getApiBase: () => E2E_CONFIG.apiBase },
-      tokenProvider: new KeycloakClientCredentialsProvider({
-        keycloakUrl: E2E_CONFIG.keycloakUrl,
-        realm: E2E_CONFIG.keycloakRealm,
-        clientId: E2E_CONFIG.clientId,
-        clientSecret: E2E_CONFIG.clientSecret,
-      }),
-      scope: {
-        companySlug: E2E_CONFIG.companySlug,
-        environmentSlug: E2E_CONFIG.environmentSlug,
-        systemSlug: ctx.system.slug,
-      },
+      baseUrl: E2E_CONFIG.apiBase,
+      systemSlug: ctx.system.slug,
+      clientId: E2E_CONFIG.clientId,
+      clientSecret: E2E_CONFIG.clientSecret,
       instanceId: customInstanceId,
     })
 

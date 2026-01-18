@@ -2,8 +2,6 @@ import { describe, it, expect, beforeAll } from 'vitest'
 import {
   E2E_CONFIG,
   TestAPIClient,
-  createTokenProvider,
-  createBackendTokenProvider,
   createSDKClient,
   uniqueSlug,
   sleep,
@@ -18,7 +16,6 @@ import {
   type TTestTripPolicyRule,
 } from './setup.ts'
 import { CircuitOpenError } from '../../../src/core/errors.ts'
-import type { TTokenProvider } from '../../../src/index.ts'
 
 const TIMING = {
   TRIP_WAIT_MS: 35_000,
@@ -48,42 +45,43 @@ function canRunTests(metricType: TMetricType): boolean {
   return getTestMode(metricType) !== 'skip'
 }
 
-async function setupTest(
-  sdkTokenProvider: TTokenProvider,
-  metricType: TMetricType,
-): Promise<TTestSetup> {
+async function setupTest(metricType: TMetricType): Promise<TTestSetup> {
   const mode = getTestMode(metricType)
   console.log(`Running ${metricType} test in ${mode} mode`)
 
+  const apiClient = new TestAPIClient(
+    E2E_CONFIG.apiBase,
+    E2E_CONFIG.clientId,
+    E2E_CONFIG.clientSecret,
+  )
+
   if (mode === 'fixtures') {
     const fixtures = metricType === 'failure-rate' ? getFailureRateFixtures() : getLatencyFixtures()
-    const apiClient = new TestAPIClient(sdkTokenProvider, E2E_CONFIG.apiBase)
 
-    const system: TTestSystem = {
-      id: fixtures.systemId,
-      slug: fixtures.systemSlug,
-      name: `Fixture: ${fixtures.systemSlug}`,
+    // Look up system and breaker by slug
+    const system = await apiClient.getSystemBySlug(fixtures.systemSlug)
+    const breakers = await apiClient.listBreakers(system.id)
+    let breaker = breakers.find((b) => b.slug === fixtures.breakerSlug)
+
+    if (!breaker) {
+      throw new Error(
+        `Breaker with slug "${fixtures.breakerSlug}" not found in system "${fixtures.systemSlug}"`,
+      )
     }
 
-    let breaker = await apiClient.getBreaker(system.id, fixtures.breakerId)
     console.log(`Using fixture breaker: ${breaker.slug} (${breaker.state})`)
 
     if (breaker.state !== 'closed') {
       console.log('Resetting breaker to closed state...')
-      breaker = await apiClient.updateBreakerState(
-        system.id,
-        breaker.id,
-        'closed',
-        'E2E test reset',
-      )
+      await apiClient.updateBreakerState(system.id, breaker.id, 'closed', 'E2E test reset')
+      // Re-fetch breaker after state update
+      breaker = await apiClient.getBreaker(system.id, breaker.id)
     }
 
     return { apiClient, system, breaker }
   }
 
   // Dynamic creation mode
-  const backendTokenProvider = createBackendTokenProvider()
-  const apiClient = new TestAPIClient(backendTokenProvider, E2E_CONFIG.apiBase)
 
   const prefix = metricType === 'failure-rate' ? 'e2e-fr' : 'e2e-lat'
   const systemSlug = uniqueSlug(prefix)
@@ -176,15 +174,13 @@ async function triggerFailures(
 }
 
 describe.skipIf(!canRunTests('failure-rate'))('E2E: Circuit Breaker Lifecycle', () => {
-  let sdkTokenProvider: TTokenProvider
   let apiClient: TestAPIClient
   let system: TTestSystem
   let breaker: TTestBreaker
 
   beforeAll(async () => {
     process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
-    sdkTokenProvider = createTokenProvider()
-    const setup = await setupTest(sdkTokenProvider, 'failure-rate')
+    const setup = await setupTest('failure-rate')
     apiClient = setup.apiClient
     system = setup.system
     breaker = setup.breaker
@@ -193,7 +189,7 @@ describe.skipIf(!canRunTests('failure-rate'))('E2E: Circuit Breaker Lifecycle', 
   it(
     'should trip breaker when failure rate exceeds threshold',
     async () => {
-      const client = createSDKClient(sdkTokenProvider, system.slug)
+      const client = createSDKClient(system.slug)
       await client.bootstrap()
 
       try {
@@ -221,7 +217,7 @@ describe.skipIf(!canRunTests('failure-rate'))('E2E: Circuit Breaker Lifecycle', 
   it(
     'should transition to half-open after probe interval',
     async () => {
-      const client = createSDKClient(sdkTokenProvider, system.slug)
+      const client = createSDKClient(system.slug)
       await client.bootstrap()
 
       try {
@@ -273,7 +269,7 @@ describe.skipIf(!canRunTests('failure-rate'))('E2E: Circuit Breaker Lifecycle', 
   it(
     'should close breaker after successful probe in half-open state',
     async () => {
-      const client = createSDKClient(sdkTokenProvider, system.slug)
+      const client = createSDKClient(system.slug)
       await client.bootstrap()
 
       try {
@@ -294,14 +290,12 @@ describe.skipIf(!canRunTests('failure-rate'))('E2E: Circuit Breaker Lifecycle', 
 })
 
 describe.skipIf(!canRunTests('failure-rate'))('E2E: Circuit Breaker - onOpen fallback', () => {
-  let sdkTokenProvider: TTokenProvider
   let system: TTestSystem
   let breaker: TTestBreaker
 
   beforeAll(async () => {
     process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
-    sdkTokenProvider = createTokenProvider()
-    const setup = await setupTest(sdkTokenProvider, 'failure-rate')
+    const setup = await setupTest('failure-rate')
     system = setup.system
     breaker = setup.breaker
   }, TIMING.TEST_TIMEOUT_MS)
@@ -309,7 +303,7 @@ describe.skipIf(!canRunTests('failure-rate'))('E2E: Circuit Breaker - onOpen fal
   it(
     'should call onOpen fallback when breaker trips',
     async () => {
-      const client = createSDKClient(sdkTokenProvider, system.slug)
+      const client = createSDKClient(system.slug)
       await client.bootstrap()
 
       try {
@@ -345,14 +339,12 @@ describe.skipIf(!canRunTests('failure-rate'))('E2E: Circuit Breaker - onOpen fal
 })
 
 describe.skipIf(!canRunTests('latency-p95'))('E2E: Circuit Breaker - Latency p95 trip', () => {
-  let sdkTokenProvider: TTokenProvider
   let system: TTestSystem
   let breaker: TTestBreaker
 
   beforeAll(async () => {
     process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
-    sdkTokenProvider = createTokenProvider()
-    const setup = await setupTest(sdkTokenProvider, 'latency-p95')
+    const setup = await setupTest('latency-p95')
     system = setup.system
     breaker = setup.breaker
   }, TIMING.TEST_TIMEOUT_MS)
@@ -360,7 +352,7 @@ describe.skipIf(!canRunTests('latency-p95'))('E2E: Circuit Breaker - Latency p95
   it(
     'should trip breaker when latency p95 exceeds threshold',
     async () => {
-      const client = createSDKClient(sdkTokenProvider, system.slug)
+      const client = createSDKClient(system.slug)
       await client.bootstrap()
 
       try {
@@ -422,14 +414,12 @@ describe.skipIf(!canRunTests('latency-p95'))('E2E: Circuit Breaker - Latency p95
 describe.skipIf(!canRunTests('failure-rate'))(
   'E2E: Circuit Breaker - Pure withBreaker() flow',
   () => {
-    let sdkTokenProvider: TTokenProvider
     let system: TTestSystem
     let breaker: TTestBreaker
 
     beforeAll(async () => {
       process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
-      sdkTokenProvider = createTokenProvider()
-      const setup = await setupTest(sdkTokenProvider, 'failure-rate')
+      const setup = await setupTest('failure-rate')
       system = setup.system
       breaker = setup.breaker
     }, TIMING.TEST_TIMEOUT_MS)
@@ -437,7 +427,7 @@ describe.skipIf(!canRunTests('failure-rate'))(
     it(
       'should block calls after failures trip the breaker',
       async () => {
-        const client = createSDKClient(sdkTokenProvider, system.slug)
+        const client = createSDKClient(system.slug)
         await client.bootstrap()
 
         try {

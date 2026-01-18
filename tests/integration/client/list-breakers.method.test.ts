@@ -1,14 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { Openfuse } from '../../../src/client/openfuse.ts'
-import type { TEndpointProvider, TTokenProvider } from '../../../src/core/types.ts'
-import { makeBreaker, makeSystem } from '../../helpers/factories.ts'
-import { setupAPISpies } from '../../helpers/mocks/api.mock.ts'
-
-const endpointProvider: TEndpointProvider = { getApiBase: () => 'https://api.test' }
-const tokenProvider: TTokenProvider = { getToken: async () => 'token-123' }
+import {
+  createTestClient,
+  makeSdkBootstrapResponse,
+  makeBreaker,
+  makeSystem,
+  setupAPISpies,
+  type TAPISpies,
+} from '../../helpers/index.ts'
 
 describe('Openfuse.listBreakers', () => {
-  let mockAPI: ReturnType<typeof setupAPISpies>
+  let mockAPI: TAPISpies
 
   beforeEach(() => {
     mockAPI = setupAPISpies()
@@ -23,18 +24,19 @@ describe('Openfuse.listBreakers', () => {
       const system = makeSystem()
       const breaker = makeBreaker()
 
-      mockAPI.systems.getSystemBySlug.mockResolvedValueOnce(system)
+      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [] })
+      mockAPI.auth.bootstrap.mockResolvedValueOnce(bootstrapResponse)
       mockAPI.breakers.listBreakers.mockResolvedValueOnce([breaker])
 
-      const client = new Openfuse({
-        endpointProvider,
-        tokenProvider,
-        scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
-      })
+      const client = createTestClient({ systemSlug: system.slug })
+      await client.bootstrap()
 
       const list = await client.listBreakers()
       expect(list).toEqual([breaker])
-      expect(mockAPI.breakers.listBreakers).toHaveBeenCalledWith(system.id, undefined)
+      expect(mockAPI.breakers.listBreakers).toHaveBeenCalledWith(
+        bootstrapResponse.system.id,
+        undefined,
+      )
     })
 
     it('does not cache the list itself: consecutive calls hit API each time', async () => {
@@ -42,14 +44,12 @@ describe('Openfuse.listBreakers', () => {
       const a = makeBreaker()
       const b = makeBreaker()
 
-      mockAPI.systems.getSystemBySlug.mockResolvedValue(system)
+      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [] })
+      mockAPI.auth.bootstrap.mockResolvedValueOnce(bootstrapResponse)
       mockAPI.breakers.listBreakers.mockResolvedValueOnce([a]).mockResolvedValueOnce([b])
 
-      const client = new Openfuse({
-        endpointProvider,
-        tokenProvider,
-        scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
-      })
+      const client = createTestClient({ systemSlug: system.slug })
+      await client.bootstrap()
 
       const first = await client.listBreakers()
       const second = await client.listBreakers()

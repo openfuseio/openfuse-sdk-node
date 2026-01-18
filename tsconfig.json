@@ -12,6 +12,7 @@
     "sourceMap": true, // Emits source maps (useful for debugging)
     "declaration": true, // Generates corresponding '.d.ts' file
     "declarationMap": true, // Create sourcemaps for '.d.ts' files.
+    "resolveJsonModule": true, // Allow importing JSON files
     "rootDir": ".",
     "outDir": "dist"
   }
