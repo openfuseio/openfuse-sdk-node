@@ -1,27 +1,14 @@
 import { beforeAll, afterAll } from 'vitest'
-import {
-  Openfuse,
-  KeycloakClientCredentialsProvider,
-  type TTokenProvider,
-} from '../../../src/index.ts'
+import { Openfuse } from '../../../src/index.ts'
 
 const REQUIRED_ENV_VARS = [
   'E2E_API_BASE',
-  'E2E_KEYCLOAK_URL',
-  'E2E_KEYCLOAK_REALM',
   'E2E_CLIENT_ID',
   'E2E_CLIENT_SECRET',
-  'E2E_COMPANY_SLUG',
-  'E2E_ENVIRONMENT_SLUG',
 ] as const
 
 const OPTIONAL_ENV_VARS = [
-  'E2E_BACKEND_CLIENT_ID',
-  'E2E_BACKEND_CLIENT_SECRET',
-  'E2E_TEST_CLIENT_ID',
-  'E2E_TEST_CLIENT_SECRET',
-  'E2E_ROOT_USER_EMAIL',
-  'E2E_ROOT_USER_PASSWORD',
+  'E2E_ADMIN_TOKEN', // Optional: pre-generated admin token for resource management
 ] as const
 
 function validateEnvironment(): void {
@@ -56,18 +43,9 @@ validateEnvironment()
 
 export const E2E_CONFIG = {
   apiBase: process.env.E2E_API_BASE!,
-  keycloakUrl: process.env.E2E_KEYCLOAK_URL!,
-  keycloakRealm: process.env.E2E_KEYCLOAK_REALM!,
   clientId: process.env.E2E_CLIENT_ID!,
   clientSecret: process.env.E2E_CLIENT_SECRET!,
-  companySlug: process.env.E2E_COMPANY_SLUG!,
-  environmentSlug: process.env.E2E_ENVIRONMENT_SLUG!,
-  backendClientId: process.env.E2E_BACKEND_CLIENT_ID,
-  backendClientSecret: process.env.E2E_BACKEND_CLIENT_SECRET,
-  e2eTestClientId: process.env.E2E_TEST_CLIENT_ID,
-  e2eTestClientSecret: process.env.E2E_TEST_CLIENT_SECRET,
-  rootUserEmail: process.env.E2E_ROOT_USER_EMAIL,
-  rootUserPassword: process.env.E2E_ROOT_USER_PASSWORD,
+  adminToken: process.env.E2E_ADMIN_TOKEN,
 }
 
 export type TTestSystem = {
@@ -118,25 +96,58 @@ export type TTestPolicyAssignment = {
 }
 
 export type TTestContext = {
-  tokenProvider: TTokenProvider
   apiClient: TestAPIClient
   system: TTestSystem
   breakers: TTestBreaker[]
   createSDKClient: (systemSlug?: string) => Openfuse
 }
 
+/**
+ * Admin API client for E2E test resource management.
+ * Uses Basic Auth or admin token for authenticated requests.
+ */
 export class TestAPIClient {
-  private tokenProvider: TTokenProvider
   private apiBase: string
+  private clientId: string
+  private clientSecret: string
+  private cachedToken: string | null = null
 
-  constructor(tokenProvider: TTokenProvider, apiBase: string) {
-    this.tokenProvider = tokenProvider
+  constructor(apiBase: string, clientId: string, clientSecret: string) {
     this.apiBase = apiBase
+    this.clientId = clientId
+    this.clientSecret = clientSecret
+  }
+
+  private async getToken(): Promise<string> {
+    if (this.cachedToken) return this.cachedToken
+
+    // Use admin token if provided
+    if (E2E_CONFIG.adminToken) {
+      this.cachedToken = E2E_CONFIG.adminToken
+      return this.cachedToken
+    }
+
+    // Use token endpoint with Basic Auth to get an access token
+    const basicAuth = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64')
+    const response = await fetch(`${this.apiBase}/v1/sdk/auth/token`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Basic ${basicAuth}`,
+      },
+    })
+
+    if (!response.ok) {
+      throw new Error(`Failed to get token: ${response.status}`)
+    }
+
+    const result = (await response.json()) as { data: { accessToken: string } }
+    this.cachedToken = result.data.accessToken
+    return this.cachedToken
   }
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const token = await this.tokenProvider.getToken()
-    const url = `${this.apiBase}${path}`
+    const token = await this.getToken()
+    const url = `${this.apiBase}/v1${path}`
 
     const response = await fetch(url, {
       method,
@@ -266,115 +277,12 @@ export function uniqueSlug(base: string): string {
   return `${base}-${random}`
 }
 
-export function createTokenProvider(): TTokenProvider {
-  return new KeycloakClientCredentialsProvider({
-    keycloakUrl: E2E_CONFIG.keycloakUrl,
-    realm: E2E_CONFIG.keycloakRealm,
+export function createSDKClient(systemSlug: string): Openfuse {
+  return new Openfuse({
+    baseUrl: E2E_CONFIG.apiBase,
+    systemSlug,
     clientId: E2E_CONFIG.clientId,
     clientSecret: E2E_CONFIG.clientSecret,
-  })
-}
-
-export function createBackendTokenProvider(): TTokenProvider {
-  if (!E2E_CONFIG.backendClientId || !E2E_CONFIG.backendClientSecret) {
-    throw new Error(
-      'Backend authentication requires E2E_BACKEND_CLIENT_ID and E2E_BACKEND_CLIENT_SECRET',
-    )
-  }
-
-  return new KeycloakClientCredentialsProvider({
-    keycloakUrl: E2E_CONFIG.keycloakUrl,
-    realm: E2E_CONFIG.keycloakRealm,
-    clientId: E2E_CONFIG.backendClientId,
-    clientSecret: E2E_CONFIG.backendClientSecret,
-  })
-}
-
-export function createUserTokenProvider(): TTokenProvider {
-  const missing: string[] = []
-  if (!E2E_CONFIG.e2eTestClientId) missing.push('E2E_TEST_CLIENT_ID')
-  if (!E2E_CONFIG.e2eTestClientSecret) missing.push('E2E_TEST_CLIENT_SECRET')
-  if (!E2E_CONFIG.rootUserEmail) missing.push('E2E_ROOT_USER_EMAIL')
-  if (!E2E_CONFIG.rootUserPassword) missing.push('E2E_ROOT_USER_PASSWORD')
-
-  if (missing.length > 0) {
-    throw new Error(`User authentication requires: ${missing.join(', ')}`)
-  }
-
-  return new KeycloakPasswordGrantProvider({
-    keycloakUrl: E2E_CONFIG.keycloakUrl,
-    realm: E2E_CONFIG.keycloakRealm,
-    clientId: E2E_CONFIG.e2eTestClientId!,
-    clientSecret: E2E_CONFIG.e2eTestClientSecret!,
-    username: E2E_CONFIG.rootUserEmail!,
-    password: E2E_CONFIG.rootUserPassword!,
-  })
-}
-
-class KeycloakPasswordGrantProvider implements TTokenProvider {
-  private readonly config: {
-    keycloakUrl: string
-    realm: string
-    clientId: string
-    clientSecret: string
-    username: string
-    password: string
-  }
-  private token: string | null = null
-  private tokenExpiry: number = 0
-
-  constructor(config: {
-    keycloakUrl: string
-    realm: string
-    clientId: string
-    clientSecret: string
-    username: string
-    password: string
-  }) {
-    this.config = config
-  }
-
-  async getToken(): Promise<string> {
-    if (this.token && Date.now() < this.tokenExpiry - 30_000) {
-      return this.token
-    }
-
-    const tokenUrl = `${this.config.keycloakUrl}/realms/${this.config.realm}/protocol/openid-connect/token`
-
-    const response = await fetch(tokenUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'password',
-        client_id: this.config.clientId,
-        client_secret: this.config.clientSecret,
-        username: this.config.username,
-        password: this.config.password,
-      }),
-    })
-
-    if (!response.ok) {
-      const text = await response.text()
-      throw new Error(`Failed to get token via password grant: ${response.status} ${text}`)
-    }
-
-    const data = (await response.json()) as { access_token: string; expires_in: number }
-    this.token = data.access_token
-    this.tokenExpiry = Date.now() + data.expires_in * 1000
-
-    return this.token
-  }
-}
-
-export function createSDKClient(tokenProvider: TTokenProvider, systemSlug: string): Openfuse {
-  return new Openfuse({
-    endpointProvider: { getApiBase: () => E2E_CONFIG.apiBase },
-    tokenProvider,
-    scope: {
-      companySlug: E2E_CONFIG.companySlug,
-      environmentSlug: E2E_CONFIG.environmentSlug,
-      systemSlug,
-    },
     metrics: { windowSizeMs: 5_000, flushIntervalMs: 10_000 },
   })
 }
@@ -384,7 +292,6 @@ export function setupE2ETest(options?: {
   breakerStates?: ('open' | 'closed')[]
 }): TTestContext {
   const context: TTestContext = {
-    tokenProvider: null!,
     apiClient: null!,
     system: null!,
     breakers: [],
@@ -397,8 +304,11 @@ export function setupE2ETest(options?: {
   beforeAll(async () => {
     process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
 
-    context.tokenProvider = createTokenProvider()
-    context.apiClient = new TestAPIClient(context.tokenProvider, E2E_CONFIG.apiBase)
+    context.apiClient = new TestAPIClient(
+      E2E_CONFIG.apiBase,
+      E2E_CONFIG.clientId,
+      E2E_CONFIG.clientSecret,
+    )
 
     const systemSlug = uniqueSlug('e2e-sys')
     context.system = await context.apiClient.createSystem({
@@ -420,7 +330,7 @@ export function setupE2ETest(options?: {
     }
 
     context.createSDKClient = (systemSlug?: string) =>
-      createSDKClient(context.tokenProvider, systemSlug ?? context.system.slug)
+      createSDKClient(systemSlug ?? context.system.slug)
   })
 
   afterAll(async () => {
@@ -432,7 +342,6 @@ export function setupE2ETest(options?: {
 
 export function setupE2ETestWithExistingData(options: { systemSlug: string }): TTestContext {
   const context: TTestContext = {
-    tokenProvider: null!,
     apiClient: null!,
     system: null!,
     breakers: [],
@@ -442,28 +351,18 @@ export function setupE2ETestWithExistingData(options: { systemSlug: string }): T
   beforeAll(async () => {
     process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
 
-    context.tokenProvider = createTokenProvider()
-    context.apiClient = new TestAPIClient(context.tokenProvider, E2E_CONFIG.apiBase)
+    context.apiClient = new TestAPIClient(
+      E2E_CONFIG.apiBase,
+      E2E_CONFIG.clientId,
+      E2E_CONFIG.clientSecret,
+    )
     context.system = await context.apiClient.getSystemBySlug(options.systemSlug)
     context.breakers = await context.apiClient.listBreakers(context.system.id)
     context.createSDKClient = (systemSlug?: string) =>
-      createSDKClient(context.tokenProvider, systemSlug ?? context.system.slug)
+      createSDKClient(systemSlug ?? context.system.slug)
   })
 
   return context
-}
-
-export function hasBackendCredentials(): boolean {
-  return !!(E2E_CONFIG.backendClientId && E2E_CONFIG.backendClientSecret)
-}
-
-export function hasUserCredentials(): boolean {
-  return !!(
-    E2E_CONFIG.e2eTestClientId &&
-    E2E_CONFIG.e2eTestClientSecret &&
-    E2E_CONFIG.rootUserEmail &&
-    E2E_CONFIG.rootUserPassword
-  )
 }
 
 export async function waitFor(
@@ -484,6 +383,10 @@ export async function waitFor(
 
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+export function hasBackendCredentials(): boolean {
+  return !!(E2E_CONFIG.clientId && E2E_CONFIG.clientSecret && E2E_CONFIG.apiBase)
 }
 
 export {

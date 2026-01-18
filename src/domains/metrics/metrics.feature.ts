@@ -1,7 +1,6 @@
 import { TTLCache } from '../../core/cache.ts'
 import type { MetricsApi } from './metrics.api.ts'
 import type { BreakersFeature } from '../breakers/breakers.feature.ts'
-import type { SystemFeature } from '../system/system.feature.ts'
 import type {
   TMetricsConfig,
   TBreakerWindowMetrics,
@@ -18,9 +17,9 @@ type TMetricsBuffer = Map<TWindowKey, Map<TBreakerSlug, TBreakerWindowMetrics>>
 export type TMetricsFeatureOptions = {
   api: MetricsApi
   breakersFeature: BreakersFeature
-  systemFeature: SystemFeature
   instanceId: string
   config?: Partial<TMetricsConfig>
+  getSystemId?: () => string
 }
 
 const STANDARD_METRICS = {
@@ -46,16 +45,16 @@ export class MetricsFeature {
 
   private readonly api: MetricsApi
   private readonly breakersFeature: BreakersFeature
-  private readonly systemFeature: SystemFeature
   private readonly instanceId: string
+  private readonly getSystemId?: () => string
 
   private static readonly METRIC_CACHE_TTL_MS = 600_000
 
   constructor(options: TMetricsFeatureOptions) {
     this.api = options.api
     this.breakersFeature = options.breakersFeature
-    this.systemFeature = options.systemFeature
     this.instanceId = options.instanceId
+    this.getSystemId = options.getSystemId
     this.config = { ...DEFAULT_METRICS_CONFIG, ...options.config }
     this.metricSlugToId = new TTLCache({ maximumEntries: 1000 })
 
@@ -128,6 +127,7 @@ export class MetricsFeature {
 
   public async flush(): Promise<void> {
     if (this.isFlushing) return
+    if (!this.getSystemId) return // Can't flush without systemId
     this.isFlushing = true
 
     try {
@@ -142,7 +142,7 @@ export class MetricsFeature {
       if (completedWindows.length === 0) return
 
       await this.ensureMetricsLoaded()
-      const systemId = await this.systemFeature.resolveSystemId()
+      const systemId = this.getSystemId()
 
       for (const [windowKey, breakerMetrics] of completedWindows) {
         const { windowStart, windowEnd } = this.parseWindowKey(windowKey)

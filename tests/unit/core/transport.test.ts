@@ -2,23 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { APIError, AuthError } from '../../../src/core/errors.ts'
 import { Transport } from '../../../src/core/transport.ts'
 import type { TTokenProvider } from '../../../src/core/types.ts'
-
-function createMockTokenProvider(
-  token = 'test-token',
-): TTokenProvider & { clearCache: ReturnType<typeof vi.fn> } {
-  return {
-    getToken: vi.fn().mockResolvedValue(token),
-    clearCache: vi.fn(),
-  }
-}
-
-function createMockFetch(response: Partial<Response> & { ok: boolean; status: number }) {
-  return vi.fn().mockResolvedValue({
-    json: () => Promise.resolve({ data: {} }),
-    text: () => Promise.resolve(''),
-    ...response,
-  })
-}
+import { createMockFetch, createMockTokenProvider, TEST_CONFIG } from '../../helpers/index.ts'
 
 describe('Transport', () => {
   let originalFetch: typeof global.fetch
@@ -51,7 +35,7 @@ describe('Transport', () => {
       global.fetch = fetchMock
 
       const transport = new Transport({
-        endpointProvider: { getApiBase: () => 'https://api.example.com' },
+        baseUrl: TEST_CONFIG.baseUrl,
         tokenProvider,
       })
 
@@ -81,7 +65,7 @@ describe('Transport', () => {
       global.fetch = fetchMock
 
       const transport = new Transport({
-        endpointProvider: { getApiBase: () => 'https://api.example.com' },
+        baseUrl: TEST_CONFIG.baseUrl,
         tokenProvider,
       })
 
@@ -98,7 +82,7 @@ describe('Transport', () => {
       global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 401 })
 
       const transport = new Transport({
-        endpointProvider: { getApiBase: () => 'https://api.example.com' },
+        baseUrl: TEST_CONFIG.baseUrl,
         tokenProvider,
       })
 
@@ -115,7 +99,7 @@ describe('Transport', () => {
       global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 403 })
 
       const transport = new Transport({
-        endpointProvider: { getApiBase: () => 'https://api.example.com' },
+        baseUrl: TEST_CONFIG.baseUrl,
         tokenProvider,
       })
 
@@ -131,7 +115,7 @@ describe('Transport', () => {
       global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 401 })
 
       const transport = new Transport({
-        endpointProvider: { getApiBase: () => 'https://api.example.com' },
+        baseUrl: TEST_CONFIG.baseUrl,
         tokenProvider,
       })
 
@@ -159,7 +143,7 @@ describe('Transport', () => {
       global.fetch = fetchMock
 
       const transport = new Transport({
-        endpointProvider: { getApiBase: () => 'https://api.example.com' },
+        baseUrl: TEST_CONFIG.baseUrl,
         tokenProvider,
       })
 
@@ -178,7 +162,7 @@ describe('Transport', () => {
       })
 
       const transport = new Transport({
-        endpointProvider: { getApiBase: () => 'https://api.example.com' },
+        baseUrl: TEST_CONFIG.baseUrl,
         tokenProvider,
       })
 
@@ -198,7 +182,7 @@ describe('Transport', () => {
       global.fetch = fetchMock
 
       const transport = new Transport({
-        endpointProvider: { getApiBase: () => 'https://api.example.com' },
+        baseUrl: TEST_CONFIG.baseUrl,
         tokenProvider,
       })
 
@@ -225,7 +209,7 @@ describe('Transport', () => {
       })
 
       const transport = new Transport({
-        endpointProvider: { getApiBase: () => 'https://api.example.com' },
+        baseUrl: TEST_CONFIG.baseUrl,
         tokenProvider,
       })
 
@@ -247,7 +231,7 @@ describe('Transport', () => {
       global.fetch = fetchMock
 
       const transport = new Transport({
-        endpointProvider: { getApiBase: () => 'https://api.example.com' },
+        baseUrl: TEST_CONFIG.baseUrl,
         tokenProvider,
         retryPolicy: { attempts: 3, baseDelayInMilliseconds: 1, maximumDelayInMilliseconds: 10 },
       })

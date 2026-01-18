@@ -1,50 +1,45 @@
-import type { TRegion } from '../core/types.ts'
 import type { TMetricsConfig } from '../domains/metrics/types.ts'
-import { CloudAuth } from '../providers/auth/cloud-auth.ts'
-import { CloudEndpoint } from '../providers/endpoint/cloud-endpoint.ts'
 import { Openfuse } from './openfuse.ts'
 
+const OPENFUSE_CLOUD_API_URL = 'https://api.openfuse.io/v1'
+
 export type TOpenfuseCloudOptions = {
-  /** Openfuse Cloud region (e.g., 'us'). */
-  region: TRegion
-  /** Company slug as configured in Openfuse Cloud. */
-  company: string
-  /** Environment slug (e.g., 'prod', 'staging'). */
-  environment: string
-  /** System slug that groups related breakers. */
+  /** System slug that groups related breakers */
   systemSlug: string
-  /** OAuth2 client ID from Openfuse Cloud. */
+  /** SDK client ID from Openfuse Cloud dashboard */
   clientId: string
-  /** OAuth2 client secret from Openfuse Cloud. */
+  /** SDK client secret from Openfuse Cloud dashboard */
   clientSecret: string
-  /** Optional metrics configuration. */
+  /** Optional metrics configuration (overrides server config) */
   metrics?: Partial<TMetricsConfig>
-  /** Optional custom instance ID for metrics deduplication. */
+  /** Optional custom instance ID for metrics deduplication */
   instanceId?: string
 }
 
 /**
  * Openfuse client pre-configured for Openfuse Cloud.
- * For self-hosted deployments, use the base `Openfuse` class instead.
+ * Uses the standard Openfuse Cloud API endpoint.
+ *
+ * @example
+ * ```typescript
+ * const client = new OpenfuseCloud({
+ *   systemSlug: 'payments',
+ *   clientId: 'sdk_abc123',
+ *   clientSecret: 'secret_xyz',
+ * })
+ *
+ * await client.bootstrap()
+ *
+ * const isOpen = await client.isOpen('external-api')
+ * ```
  */
 export class OpenfuseCloud extends Openfuse {
   constructor(options: TOpenfuseCloudOptions) {
     super({
-      endpointProvider: new CloudEndpoint({
-        region: options.region,
-        company: options.company,
-        environment: options.environment,
-      }),
-      tokenProvider: new CloudAuth({
-        region: options.region,
-        clientId: options.clientId,
-        clientSecret: options.clientSecret,
-      }),
-      scope: {
-        companySlug: options.company,
-        environmentSlug: options.environment,
-        systemSlug: options.systemSlug,
-      },
+      baseUrl: OPENFUSE_CLOUD_API_URL,
+      systemSlug: options.systemSlug,
+      clientId: options.clientId,
+      clientSecret: options.clientSecret,
       metrics: options.metrics,
       instanceId: options.instanceId,
     })

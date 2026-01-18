@@ -1,14 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { Openfuse } from '../../../src/client/openfuse.ts'
-import type { TEndpointProvider, TTokenProvider } from '../../../src/core/types.ts'
-import { makeBootstrap, makeBreaker, makeSystem } from '../../helpers/factories.ts'
-import { setupAPISpies } from '../../helpers/mocks/api.mock.ts'
-
-const endpointProvider: TEndpointProvider = { getApiBase: () => 'https://api.test' }
-const tokenProvider: TTokenProvider = { getToken: async () => 'token-123' }
+import {
+  createTestClient,
+  makeSdkBootstrapResponse,
+  makeBreaker,
+  makeSystem,
+  setupAPISpies,
+  type TAPISpies,
+} from '../../helpers/index.ts'
 
 describe('Openfuse.isOpen', () => {
-  let mockAPI: ReturnType<typeof setupAPISpies>
+  let mockAPI: TAPISpies
 
   beforeEach(() => {
     mockAPI = setupAPISpies()
@@ -23,17 +24,11 @@ describe('Openfuse.isOpen', () => {
       const system = makeSystem()
       const breaker = makeBreaker({ state: 'open' })
 
-      mockAPI.systems.getSystemBySlug.mockResolvedValueOnce(system)
-      mockAPI.systems.bootstrapSystem.mockResolvedValueOnce(
-        makeBootstrap({ system, breakers: [breaker] }),
-      )
+      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [breaker] })
+      mockAPI.auth.bootstrap.mockResolvedValueOnce(bootstrapResponse)
       mockAPI.breakers.getBreaker.mockResolvedValueOnce(makeBreaker({ ...breaker, state: 'open' }))
 
-      const client = new Openfuse({
-        endpointProvider,
-        tokenProvider,
-        scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
-      })
+      const client = createTestClient({ systemSlug: system.slug })
       await client.bootstrap()
 
       expect(await client.isOpen(breaker.slug)).toBe(true)
@@ -41,48 +36,23 @@ describe('Openfuse.isOpen', () => {
 
       expect(mockAPI.breakers.listBreakers).not.toHaveBeenCalled()
       expect(mockAPI.breakers.getBreaker).toHaveBeenCalledTimes(1)
-      expect(mockAPI.breakers.getBreaker).toHaveBeenCalledWith(system.id, breaker.id, undefined)
-    })
-
-    it('without bootstrap mapping -> listBreakers then getBreaker; second call uses cached state', async () => {
-      const system = makeSystem()
-      const breaker = makeBreaker({ state: 'open' })
-
-      mockAPI.systems.getSystemBySlug.mockResolvedValueOnce(system)
-      mockAPI.breakers.listBreakers.mockResolvedValueOnce([breaker])
-      mockAPI.breakers.getBreaker.mockResolvedValueOnce(makeBreaker({ ...breaker, state: 'open' }))
-
-      const client = new Openfuse({
-        endpointProvider,
-        tokenProvider,
-        scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
-      })
-
-      expect(await client.isOpen(breaker.slug)).toBe(true)
-      expect(await client.isOpen(breaker.slug)).toBe(true)
-
-      expect(mockAPI.breakers.listBreakers).toHaveBeenCalledTimes(1)
-      expect(mockAPI.breakers.listBreakers).toHaveBeenCalledWith(system.id, undefined)
-      expect(mockAPI.breakers.getBreaker).toHaveBeenCalledTimes(1)
-      expect(mockAPI.breakers.getBreaker).toHaveBeenCalledWith(system.id, breaker.id, undefined)
+      expect(mockAPI.breakers.getBreaker).toHaveBeenCalledWith(
+        bootstrapResponse.system.id,
+        breaker.id,
+        undefined,
+      )
     })
 
     it('after invalidate -> mapping is rebuilt (listBreakers) and state API called again', async () => {
       const system = makeSystem()
       const breaker = makeBreaker({ state: 'open' })
 
-      mockAPI.systems.getSystemBySlug.mockResolvedValue(system)
-      mockAPI.systems.bootstrapSystem.mockResolvedValue(
-        makeBootstrap({ system, breakers: [breaker] }),
-      )
+      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [breaker] })
+      mockAPI.auth.bootstrap.mockResolvedValueOnce(bootstrapResponse)
       mockAPI.breakers.listBreakers.mockResolvedValue([breaker])
       mockAPI.breakers.getBreaker.mockResolvedValue(makeBreaker({ ...breaker, state: 'open' }))
 
-      const client = new Openfuse({
-        endpointProvider,
-        tokenProvider,
-        scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
-      })
+      const client = createTestClient({ systemSlug: system.slug })
       await client.bootstrap()
 
       expect(await client.isOpen(breaker.slug)).toBe(true)
@@ -90,8 +60,15 @@ describe('Openfuse.isOpen', () => {
       await client.invalidate()
 
       expect(await client.isOpen(breaker.slug)).toBe(true)
-      expect(mockAPI.breakers.listBreakers).toHaveBeenCalledWith(system.id, undefined)
-      expect(mockAPI.breakers.getBreaker).toHaveBeenCalledWith(system.id, breaker.id, undefined)
+      expect(mockAPI.breakers.listBreakers).toHaveBeenCalledWith(
+        bootstrapResponse.system.id,
+        undefined,
+      )
+      expect(mockAPI.breakers.getBreaker).toHaveBeenCalledWith(
+        bootstrapResponse.system.id,
+        breaker.id,
+        undefined,
+      )
     })
   })
 
@@ -100,22 +77,20 @@ describe('Openfuse.isOpen', () => {
       const system = makeSystem()
       const breaker = makeBreaker({ state: 'open' })
 
-      mockAPI.systems.getSystemBySlug.mockResolvedValueOnce(system)
-      mockAPI.systems.bootstrapSystem.mockResolvedValueOnce(
-        makeBootstrap({ system, breakers: [breaker] }),
-      )
+      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [breaker] })
+      mockAPI.auth.bootstrap.mockResolvedValueOnce(bootstrapResponse)
       mockAPI.breakers.getBreaker.mockResolvedValueOnce(makeBreaker({ ...breaker, state: 'open' }))
 
-      const client = new Openfuse({
-        endpointProvider,
-        tokenProvider,
-        scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
-      })
+      const client = createTestClient({ systemSlug: system.slug })
       await client.bootstrap()
 
       const ac = new AbortController()
       await client.isOpen(breaker.slug, ac.signal)
-      expect(mockAPI.breakers.getBreaker).toHaveBeenCalledWith(system.id, breaker.id, ac.signal)
+      expect(mockAPI.breakers.getBreaker).toHaveBeenCalledWith(
+        bootstrapResponse.system.id,
+        breaker.id,
+        ac.signal,
+      )
     })
   })
 
@@ -124,17 +99,11 @@ describe('Openfuse.isOpen', () => {
       const system = makeSystem()
       const breaker = makeBreaker({ state: 'open' })
 
-      mockAPI.systems.getSystemBySlug.mockResolvedValueOnce(system)
-      mockAPI.systems.bootstrapSystem.mockResolvedValueOnce(
-        makeBootstrap({ system, breakers: [breaker] }),
-      )
+      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [breaker] })
+      mockAPI.auth.bootstrap.mockResolvedValueOnce(bootstrapResponse)
       mockAPI.breakers.getBreaker.mockResolvedValueOnce(makeBreaker({ ...breaker, state: 'open' }))
 
-      const client = new Openfuse({
-        endpointProvider,
-        tokenProvider,
-        scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
-      })
+      const client = createTestClient({ systemSlug: system.slug })
       await client.bootstrap()
 
       expect(await client.isOpen(breaker.slug)).toBe(true)
@@ -148,17 +117,11 @@ describe('Openfuse.isOpen', () => {
       const system = makeSystem()
       const breaker = makeBreaker()
 
-      mockAPI.systems.getSystemBySlug.mockResolvedValueOnce(system)
-      mockAPI.systems.bootstrapSystem.mockResolvedValueOnce(
-        makeBootstrap({ system, breakers: [breaker] }),
-      )
+      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [breaker] })
+      mockAPI.auth.bootstrap.mockResolvedValueOnce(bootstrapResponse)
       mockAPI.breakers.getBreaker.mockRejectedValueOnce(new Error('down'))
 
-      const client = new Openfuse({
-        endpointProvider,
-        tokenProvider,
-        scope: { companySlug: 'acme', environmentSlug: 'prod', systemSlug: system.slug },
-      })
+      const client = createTestClient({ systemSlug: system.slug })
       await client.bootstrap()
 
       await expect(client.isOpen(breaker.slug)).rejects.toThrow()

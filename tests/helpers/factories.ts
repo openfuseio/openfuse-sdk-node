@@ -1,30 +1,28 @@
 import { faker } from '@faker-js/faker'
+import type {
+  TSdkBootstrapResponse,
+  TBreakerStateValue,
+  TBreakerStateResponse,
+  TSdkTokenRefreshResponse,
+} from '../../src/types/api.ts'
 
-export type TExposedSystemDTO = {
+export type TTestSystem = {
   id: string
-  name: string
   slug: string
-  description: string | null
-  createdBy: string
-  createdAt: string
-  updatedAt: string | null
-}
-
-export type TExposedBreakerDTO = {
-  id: string
   name: string
-  slug: string
-  state: 'open' | 'closed'
-  description: string
   createdBy: string
   createdAt: string
   updatedAt: string
 }
 
-export type TBootstrapResponse = { system: TExposedSystemDTO; breakers: TExposedBreakerDTO[] }
-export type TBreakerStateResponse = { state: TExposedBreakerDTO['state'] }
+export type TTestBreaker = {
+  id: string
+  slug: string
+  state: TBreakerStateValue
+  retryAfter: string | null
+}
 
-export function makeSystem(overrides?: Partial<TExposedSystemDTO>): TExposedSystemDTO {
+export function makeSystem(overrides?: Partial<TTestSystem>): TTestSystem {
   const now = new Date().toISOString()
   const name = faker.airline.airplane().name
 
@@ -32,57 +30,90 @@ export function makeSystem(overrides?: Partial<TExposedSystemDTO>): TExposedSyst
     id: overrides?.id ?? faker.string.uuid(),
     name: overrides?.name ?? name,
     slug: overrides?.slug ?? faker.helpers.slugify(name).toLowerCase(),
-    description: overrides?.description ?? faker.lorem.sentence(),
     createdBy: overrides?.createdBy ?? faker.string.uuid(),
     createdAt: overrides?.createdAt ?? now,
     updatedAt: overrides?.updatedAt ?? now,
   }
 }
 
-export function makeBreaker(overrides?: Partial<TExposedBreakerDTO>): TExposedBreakerDTO {
-  const now = new Date().toISOString()
+export function makeBreaker(overrides?: Partial<TTestBreaker>): TTestBreaker {
   const name = faker.hacker.noun()
 
   return {
     id: overrides?.id ?? faker.string.uuid(),
-    name: overrides?.name ?? name,
     slug: overrides?.slug ?? faker.helpers.slugify(name).toLowerCase(),
-    state: overrides?.state ?? faker.helpers.arrayElement(['open', 'closed']),
-    description: overrides?.description ?? faker.lorem.sentence(),
-    createdBy: overrides?.createdBy ?? faker.string.uuid(),
-    createdAt: overrides?.createdAt ?? now,
-    updatedAt: overrides?.updatedAt ?? now,
+    state:
+      overrides?.state ?? faker.helpers.arrayElement(['open', 'closed'] as TBreakerStateValue[]),
+    retryAfter: overrides?.retryAfter ?? null,
   }
 }
 
 export function makeState(overrides?: Partial<TBreakerStateResponse>): TBreakerStateResponse {
   return {
-    state: overrides?.state ?? faker.helpers.arrayElement(['open', 'closed']),
+    state:
+      overrides?.state ?? faker.helpers.arrayElement(['open', 'closed'] as TBreakerStateValue[]),
   }
 }
 
-export function makeBootstrap({
-  system,
-  breakers,
-}: {
-  system: Partial<TExposedSystemDTO>
-  breakers: Partial<TExposedBreakerDTO>[]
-}): TBootstrapResponse {
-  const madeSystem = makeSystem(system)
+export function makeSdkBootstrapResponse(overrides?: {
+  system?: Partial<TTestSystem>
+  breakers?: Partial<TTestBreaker>[]
+  metricsConfig?: { flushIntervalMs?: number; windowSizeMs?: number }
+  accessToken?: string
+  expiresIn?: number
+}): TSdkBootstrapResponse {
+  const system = makeSystem(overrides?.system)
 
-  const madeBreakers: TExposedBreakerDTO[] = []
-
-  if (breakers) {
-    for (const overrides of breakers) {
-      madeBreakers.push(makeBreaker(overrides))
-    }
-  } else {
-    const breakersCount = faker.helpers.rangeToNumber({ min: 1, max: 10 })
-    for (let i = 0; i < breakersCount; i++) {
-      madeBreakers.push(makeBreaker())
+  const breakers: TTestBreaker[] = []
+  if (overrides?.breakers) {
+    for (const breakerOverrides of overrides.breakers) {
+      breakers.push(makeBreaker(breakerOverrides))
     }
   }
-  return { system: madeSystem, breakers: madeBreakers }
+
+  return {
+    sdkClientId: faker.string.uuid(),
+    company: {
+      id: faker.string.uuid(),
+      slug: faker.helpers.slugify(faker.company.name()).toLowerCase(),
+    },
+    environment: {
+      id: faker.string.uuid(),
+      slug: 'prod',
+    },
+    system: {
+      id: system.id,
+      slug: system.slug,
+      name: system.name,
+      createdBy: system.createdBy,
+      createdAt: system.createdAt,
+      updatedAt: system.updatedAt,
+    },
+    breakers: breakers.map((b) => ({
+      id: b.id,
+      slug: b.slug,
+      state: b.state,
+      retryAfter: b.retryAfter,
+    })),
+    serverTime: new Date().toISOString(),
+    metricsConfig: {
+      flushIntervalMs: overrides?.metricsConfig?.flushIntervalMs ?? 15000,
+      windowSizeMs: overrides?.metricsConfig?.windowSizeMs ?? 10000,
+    },
+    accessToken: overrides?.accessToken ?? `test-token-${faker.string.alphanumeric(32)}`,
+    tokenType: 'Bearer',
+    expiresIn: overrides?.expiresIn ?? 3600,
+  }
+}
+
+export function makeTokenRefreshResponse(
+  overrides?: Partial<TSdkTokenRefreshResponse>,
+): TSdkTokenRefreshResponse {
+  return {
+    accessToken: overrides?.accessToken ?? `test-token-${faker.string.alphanumeric(32)}`,
+    tokenType: overrides?.tokenType ?? 'Bearer',
+    expiresIn: overrides?.expiresIn ?? 3600,
+  }
 }
 
 export type TMetricDefinition = {

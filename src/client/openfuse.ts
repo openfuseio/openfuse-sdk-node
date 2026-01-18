@@ -1,33 +1,30 @@
 import { CircuitOpenError, TimeoutError } from '../core/errors.ts'
 import { generateInstanceId } from '../core/instance.ts'
 import { Transport } from '../core/transport.ts'
-import type {
-  TCompanyEnvironmentSystemScope,
-  TEndpointProvider,
-  TTokenProvider,
-} from '../core/types.ts'
+import { AuthApi } from '../domains/auth/auth.api.ts'
+import { TokenManager } from '../domains/auth/token-manager.ts'
 import { BreakersApi } from '../domains/breakers/breakers.api.ts'
 import { BreakersFeature } from '../domains/breakers/breakers.feature.ts'
 import { MetricsApi } from '../domains/metrics/metrics.api.ts'
 import { MetricsFeature } from '../domains/metrics/metrics.feature.ts'
 import type { TMetricsConfig } from '../domains/metrics/types.ts'
-import { SystemsApi } from '../domains/system/system.api.ts'
-import { SystemFeature } from '../domains/system/system.feature.ts'
-import type { TBreaker } from '../types/api.ts'
+import type { TBreaker, TSdkBootstrapResponse } from '../types/api.ts'
 
-type TOpenfuseOptions = {
-  endpointProvider: TEndpointProvider
-  tokenProvider: TTokenProvider
-  scope: TCompanyEnvironmentSystemScope
-  /** Optional metrics configuration */
+export type TOpenfuseOptions = {
+  /** API base URL (e.g., https://prod-acme.api.openfuse.io) */
+  baseUrl: string
+  /** System slug that groups related breakers */
+  systemSlug: string
+  /** SDK client ID from Openfuse dashboard */
+  clientId: string
+  /** SDK client secret from Openfuse dashboard */
+  clientSecret: string
+  /** Optional metrics configuration (overrides server config) */
   metrics?: Partial<TMetricsConfig>
   /**
    * Optional custom instance ID for this SDK process.
    * If not provided, the SDK auto-detects the platform (Lambda, ECS, K8s, Cloud Run, etc.)
    * and uses the appropriate identifier, falling back to hostname-pid-random.
-   *
-   * Use this when you have a specific identifier for your infrastructure
-   * that you want to use for metrics deduplication.
    */
   instanceId?: string
 }
@@ -44,49 +41,96 @@ type TWithBreakerOptions<T> = {
 }
 
 export class Openfuse {
-  private transport: Transport
-  private systemFeature: SystemFeature
-  private breakersFeature: BreakersFeature
-  private metricsFeature: MetricsFeature
+  private readonly transport: Transport
+  private readonly authApi: AuthApi
+  private readonly tokenManager: TokenManager
+  private readonly baseUrl: string
+  private readonly systemSlug: string
   private readonly instanceId: string
   private readonly metricsApi: MetricsApi
-  private readonly metricsConfig?: Partial<TMetricsConfig>
+
+  private breakersFeature: BreakersFeature
+  private metricsFeature: MetricsFeature
+  private metricsConfig?: Partial<TMetricsConfig>
+  private bootstrapData?: TSdkBootstrapResponse
 
   constructor(options: TOpenfuseOptions) {
+    this.baseUrl = options.baseUrl.replace(/\/$/, '')
+    this.systemSlug = options.systemSlug
     this.instanceId = options.instanceId ?? generateInstanceId()
     this.metricsConfig = options.metrics
 
+    // Auth API for bootstrap and token refresh
+    this.authApi = new AuthApi({
+      baseUrl: this.baseUrl,
+      clientId: options.clientId,
+      clientSecret: options.clientSecret,
+    })
+
+    // Token manager handles caching, auto-refresh, and retry
+    this.tokenManager = new TokenManager({
+      authApi: this.authApi,
+    })
+
+    // Transport for authenticated API calls
     this.transport = new Transport({
-      endpointProvider: options.endpointProvider,
-      tokenProvider: options.tokenProvider,
+      baseUrl: this.baseUrl,
+      tokenProvider: this.tokenManager,
     })
 
     const breakersApi = new BreakersApi({ transport: this.transport })
-    const systemsApi = new SystemsApi({ transport: this.transport })
     this.metricsApi = new MetricsApi({ transport: this.transport })
 
-    this.systemFeature = new SystemFeature({ scope: options.scope, api: systemsApi })
     this.breakersFeature = new BreakersFeature({ api: breakersApi })
     this.metricsFeature = new MetricsFeature({
       api: this.metricsApi,
       breakersFeature: this.breakersFeature,
-      systemFeature: this.systemFeature,
       instanceId: this.instanceId,
       config: this.metricsConfig,
+      getSystemId: () => this.getSystemId(),
     })
   }
 
   /**
-   * Initialize the SDK by fetching system configuration and breaker definitions.
-   * Call this once at application startup for optimal performance.
+   * Initialize the SDK by calling POST /sdk/bootstrap.
+   * Returns system config, breakers, metrics configuration, and an access token.
+   * Call this once at application startup.
    */
   public async bootstrap(): Promise<void> {
-    const systemId: string = await this.systemFeature.resolveSystemId()
+    const response = await this.authApi.bootstrap(this.systemSlug, {
+      instanceId: this.instanceId,
+    })
 
-    const boot = await this.systemFeature.bootstrapSystem(systemId)
-    if (boot.breakers && boot.breakers.length > 0) {
-      this.breakersFeature.ingestBootstrap(systemId, boot.breakers)
-      return
+    this.bootstrapData = response
+
+    // Store the access token for subsequent API calls
+    this.tokenManager.setToken(response.accessToken, response.expiresIn)
+
+    // Apply server-provided metrics config (user config takes precedence)
+    if (response.metricsConfig) {
+      this.metricsConfig = {
+        flushIntervalMs: response.metricsConfig.flushIntervalMs,
+        windowSizeMs: response.metricsConfig.windowSizeMs,
+        ...this.metricsConfig,
+      }
+      this.metricsFeature = new MetricsFeature({
+        api: this.metricsApi,
+        breakersFeature: this.breakersFeature,
+        instanceId: this.instanceId,
+        config: this.metricsConfig,
+        getSystemId: () => this.getSystemId(),
+      })
+    }
+
+    // Ingest breakers
+    if (response.breakers && response.breakers.length > 0) {
+      const breakers: TBreaker[] = response.breakers.map((b) => ({
+        id: b.id,
+        slug: b.slug,
+        state: b.state,
+        retryAfter: b.retryAfter,
+      }))
+      this.breakersFeature.ingestBootstrap(response.system.id, breakers)
     }
   }
 
@@ -95,8 +139,11 @@ export class Openfuse {
    * Prefer `withBreaker()` for automatic metrics and fallback handling.
    */
   public async isOpen(breakerSlug: string, signal?: AbortSignal): Promise<boolean> {
-    const systemId: string = await this.systemFeature.resolveSystemId()
-    const state = await this.breakersFeature.getBreakerStateBySlug(systemId, breakerSlug, signal)
+    const state = await this.breakersFeature.getBreakerStateBySlug(
+      this.getSystemId(),
+      breakerSlug,
+      signal,
+    )
     return state === 'open'
   }
 
@@ -105,21 +152,30 @@ export class Openfuse {
    * Prefer `withBreaker()` for automatic metrics and fallback handling.
    */
   public async isClosed(breakerSlug: string, signal?: AbortSignal): Promise<boolean> {
-    const systemId: string = await this.systemFeature.resolveSystemId()
-    const state = await this.breakersFeature.getBreakerStateBySlug(systemId, breakerSlug, signal)
+    const state = await this.breakersFeature.getBreakerStateBySlug(
+      this.getSystemId(),
+      breakerSlug,
+      signal,
+    )
     return state === 'closed'
   }
 
   /** Fetch breaker details by slug. */
-  public async getBreaker(breakerSlug: string): Promise<TBreaker> {
-    const systemId: string = await this.systemFeature.resolveSystemId()
-    return await this.breakersFeature.getBreakerBySlug(systemId, breakerSlug)
+  public async getBreaker(breakerSlug: string, signal?: AbortSignal): Promise<TBreaker> {
+    return await this.breakersFeature.getBreakerBySlug(this.getSystemId(), breakerSlug, signal)
   }
 
   /** Fetch all breakers for the configured system. */
   public async listBreakers(): Promise<TBreaker[]> {
-    const systemId: string = await this.systemFeature.resolveSystemId()
-    return await this.breakersFeature.listBreakers(systemId)
+    return await this.breakersFeature.listBreakers(this.getSystemId())
+  }
+
+  /** Get system ID from bootstrap data */
+  private getSystemId(): string {
+    if (!this.bootstrapData) {
+      throw new Error('Call bootstrap() before using the SDK')
+    }
+    return this.bootstrapData.system.id
   }
 
   /**
@@ -130,26 +186,12 @@ export class Openfuse {
    * - OPEN: calls `onOpen` fallback or throws `CircuitOpenError`
    * - UNKNOWN (state fetch failed): calls `onUnknown`, then `onOpen`, or throws `CircuitOpenError`
    *
-   * The fail-open strategy ensures protected operations don't run when state is uncertain.
-   *
    * @param breakerSlug - Breaker identifier
    * @param fn - Function to execute when breaker is closed
    * @param options.timeout - Max execution time in ms. Throws `TimeoutError` if exceeded.
    * @param options.onOpen - Fallback when breaker is open or state unknown
-   * @param options.onUnknown - Fallback specifically for state fetch failures (takes precedence over onOpen)
+   * @param options.onUnknown - Fallback specifically for state fetch failures
    * @param options.signal - AbortSignal for cancellation
-   *
-   * @example
-   * ```typescript
-   * const result = await openfuse.withBreaker(
-   *   'payment-gateway',
-   *   () => paymentService.charge(amount),
-   *   {
-   *     timeout: 5000,
-   *     onOpen: () => ({ status: 'queued' }),
-   *   },
-   * )
-   * ```
    */
   public async withBreaker<T>(
     breakerSlug: string,
@@ -163,7 +205,6 @@ export class Openfuse {
       isBreakerOpen = await this.isOpen(breakerSlug, signal)
     } catch {
       if (onUnknown) return await onUnknown()
-      // Fail-open: treat unknown state as open to avoid running potentially dangerous operations
       if (onOpen) return await onOpen()
       throw new CircuitOpenError(`Breaker state unknown (failed to fetch): ${breakerSlug}`)
     }
@@ -199,9 +240,9 @@ export class Openfuse {
     this.metricsFeature = new MetricsFeature({
       api: this.metricsApi,
       breakersFeature: this.breakersFeature,
-      systemFeature: this.systemFeature,
       instanceId: this.instanceId,
       config: this.metricsConfig,
+      getSystemId: () => this.getSystemId(),
     })
   }
 

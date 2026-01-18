@@ -20,7 +20,7 @@ export class BreakersApi implements TBreakersApi {
   public async listBreakers(systemId: string, signal?: AbortSignal): Promise<TBreaker[]> {
     return this.transport.request<TBreaker[]>(
       'GET',
-      `/systems/${encodeURIComponent(systemId)}/breakers`,
+      `/v1/systems/${encodeURIComponent(systemId)}/breakers`,
       { signal },
     )
   }
@@ -32,7 +32,7 @@ export class BreakersApi implements TBreakersApi {
   ): Promise<TBreaker> {
     return this.transport.request<TBreaker>(
       'GET',
-      `/systems/${encodeURIComponent(systemId)}/breakers/${encodeURIComponent(breakerId)}`,
+      `/v1/systems/${encodeURIComponent(systemId)}/breakers/${encodeURIComponent(breakerId)}`,
       { signal },
     )
   }

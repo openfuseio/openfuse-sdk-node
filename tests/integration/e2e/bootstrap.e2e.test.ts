@@ -75,7 +75,7 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: bootstrap()', () => {
   describe('bootstrap with non-existent system', () => {
     it('should throw error for non-existent system slug', async () => {
       const nonExistentSlug = uniqueSlug('non-existent-system')
-      const client = createSDKClient(ctx.tokenProvider, nonExistentSlug)
+      const client = createSDKClient(nonExistentSlug)
 
       // Bootstrap with invalid system should fail
       await expect(client.bootstrap()).rejects.toThrow()
@@ -121,22 +121,16 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: bootstrap()', () => {
 
 describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: bootstrap() - auth errors', () => {
   it('should throw AuthError with invalid credentials', async () => {
-    const invalidTokenProvider = {
-      getToken: async () => 'invalid-token',
-      clearToken: () => {},
-    }
+    const { Openfuse } = await import('../../../src/index.ts')
 
-    const client = new (await import('../../../src/index.ts')).Openfuse({
-      endpointProvider: { getApiBase: () => E2E_CONFIG.apiBase },
-      tokenProvider: invalidTokenProvider,
-      scope: {
-        companySlug: E2E_CONFIG.companySlug,
-        environmentSlug: E2E_CONFIG.environmentSlug,
-        systemSlug: 'any-system',
-      },
+    const client = new Openfuse({
+      baseUrl: E2E_CONFIG.apiBase,
+      systemSlug: 'any-system',
+      clientId: 'invalid-client-id',
+      clientSecret: 'invalid-client-secret',
     })
 
-    // Bootstrap with invalid token should fail with auth error
+    // Bootstrap with invalid credentials should fail with auth error
     await expect(client.bootstrap()).rejects.toThrow()
 
     await client.shutdown()

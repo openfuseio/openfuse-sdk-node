@@ -1,12 +1,12 @@
 import { vi } from 'vitest'
+import { AuthApi } from '../../../src/domains/auth/auth.api.ts'
 import { BreakersApi } from '../../../src/domains/breakers/breakers.api.ts'
 import { MetricsApi } from '../../../src/domains/metrics/metrics.api.ts'
-import { SystemsApi } from '../../../src/domains/system/system.api.ts'
 
 export const setupAPISpies = () => ({
-  systems: {
-    getSystemBySlug: vi.spyOn(SystemsApi.prototype, 'getSystemBySlug'),
-    bootstrapSystem: vi.spyOn(SystemsApi.prototype, 'bootstrapSystem'),
+  auth: {
+    bootstrap: vi.spyOn(AuthApi.prototype, 'bootstrap'),
+    refreshToken: vi.spyOn(AuthApi.prototype, 'refreshToken'),
   },
   breakers: {
     listBreakers: vi.spyOn(BreakersApi.prototype, 'listBreakers'),
@@ -19,3 +19,35 @@ export const setupAPISpies = () => ({
 })
 
 export type TAPISpies = ReturnType<typeof setupAPISpies>
+
+/**
+ * Creates a mock fetch function for testing HTTP responses.
+ * Use this in unit tests that need to mock global.fetch directly.
+ */
+export function createMockFetch(response: Partial<Response> & { ok: boolean; status: number }) {
+  return vi.fn().mockResolvedValue({
+    json: () => Promise.resolve({ data: {} }),
+    text: () => Promise.resolve(''),
+    ...response,
+  })
+}
+
+/**
+ * Creates a mock AuthApi for testing TokenManager.
+ */
+export function createMockAuthApi() {
+  return {
+    bootstrap: vi.fn(),
+    refreshToken: vi.fn(),
+  } as unknown as AuthApi
+}
+
+/**
+ * Creates a mock token provider for testing Transport.
+ */
+export function createMockTokenProvider(token = 'test-token') {
+  return {
+    getToken: vi.fn().mockResolvedValue(token),
+    clearCache: vi.fn(),
+  }
+}

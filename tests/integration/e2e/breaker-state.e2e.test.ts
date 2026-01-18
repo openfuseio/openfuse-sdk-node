@@ -174,7 +174,7 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: state changes via API', () => {
     await ctx.apiClient.updateBreakerState(ctx.system.id, testBreaker.id, 'open')
 
     // Invalidate cache to force refresh
-    client.invalidate()
+    await client.invalidate()
 
     // State should now be open
     isOpen = await client.isOpen(testBreaker.slug)

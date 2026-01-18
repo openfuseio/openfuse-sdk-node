@@ -20,7 +20,7 @@ export class MetricsApi {
     request: TIngestMetricsRequest,
     signal?: AbortSignal,
   ): Promise<TIngestMetricsResponse> {
-    return await this.transport.request<TIngestMetricsResponse>('POST', '/metrics', {
+    return await this.transport.request<TIngestMetricsResponse>('POST', '/v1/metrics', {
       body: request,
       signal,
     })
@@ -30,6 +30,6 @@ export class MetricsApi {
    * Fetch all metrics definitions for the current environment
    */
   public async listMetrics(signal?: AbortSignal): Promise<TMetric[]> {
-    return await this.transport.request<TMetric[]>('GET', '/metrics', { signal })
+    return await this.transport.request<TMetric[]>('GET', '/v1/metrics', { signal })
   }
 }

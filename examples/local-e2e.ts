@@ -12,12 +12,7 @@ if (process.env.OPENFUSE_LOCAL === '1') {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
 }
 
-import {
-  Openfuse,
-  OpenfuseCloud,
-  KeycloakClientCredentialsProvider,
-  type TRegion,
-} from '../src/index.ts'
+import { Openfuse, OpenfuseCloud } from '../src/index.ts'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Configuration
@@ -26,9 +21,6 @@ import {
 const isLocal = process.env.OPENFUSE_LOCAL === '1'
 
 const CONFIG = {
-  region: (process.env.OPENFUSE_REGION ?? 'us') as TRegion,
-  company: process.env.OPENFUSE_COMPANY ?? 'acme',
-  environment: process.env.OPENFUSE_ENVIRONMENT ?? 'prod',
   systemSlug: process.env.OPENFUSE_SYSTEM ?? 'system',
   clientId: process.env.OPENFUSE_CLIENT_ID ?? 'tzxcvw0e-clp0cabe-e2e-test-sdk',
   clientSecret: process.env.OPENFUSE_CLIENT_SECRET ?? '',
@@ -36,9 +28,7 @@ const CONFIG = {
 }
 
 const LOCAL_CONFIG = {
-  apiBase: process.env.OPENFUSE_API_BASE ?? 'https://prod--acme.api.lvh.me:3000/v1',
-  keycloakUrl: process.env.KEYCLOAK_URL ?? 'http://localhost:8080',
-  keycloakRealm: process.env.KEYCLOAK_REALM ?? 'local-openfuse-tenants',
+  apiBase: process.env.OPENFUSE_API_BASE ?? 'https://prod-acme.lvh.me:3000',
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -48,26 +38,15 @@ const LOCAL_CONFIG = {
 function createClient(): Openfuse {
   if (isLocal) {
     return new Openfuse({
-      endpointProvider: { getApiBase: () => LOCAL_CONFIG.apiBase },
-      tokenProvider: new KeycloakClientCredentialsProvider({
-        keycloakUrl: LOCAL_CONFIG.keycloakUrl,
-        realm: LOCAL_CONFIG.keycloakRealm,
-        clientId: CONFIG.clientId,
-        clientSecret: CONFIG.clientSecret,
-      }),
-      scope: {
-        companySlug: CONFIG.company,
-        environmentSlug: CONFIG.environment,
-        systemSlug: CONFIG.systemSlug,
-      },
+      baseUrl: LOCAL_CONFIG.apiBase,
+      systemSlug: CONFIG.systemSlug,
+      clientId: CONFIG.clientId,
+      clientSecret: CONFIG.clientSecret,
       metrics: { windowSizeMs: 5_000, flushIntervalMs: 10_000 },
     })
   }
 
   return new OpenfuseCloud({
-    region: CONFIG.region,
-    company: CONFIG.company,
-    environment: CONFIG.environment,
     systemSlug: CONFIG.systemSlug,
     clientId: CONFIG.clientId,
     clientSecret: CONFIG.clientSecret,
@@ -80,9 +59,6 @@ async function main() {
   console.log('-'.repeat(50))
   console.log(`Mode: ${isLocal ? 'LOCAL' : 'CLOUD'}`)
   if (isLocal) console.log(`API Base: ${LOCAL_CONFIG.apiBase}`)
-  else console.log(`Region: ${CONFIG.region}`)
-  console.log(`Company: ${CONFIG.company}`)
-  console.log(`Environment: ${CONFIG.environment}`)
   console.log(`System: ${CONFIG.systemSlug}`)
   console.log(`Breaker: ${CONFIG.breakerSlug}`)
   console.log('-'.repeat(50))

@@ -1,7 +1,7 @@
 import { AbortOperationError, APIError, AuthError } from './errors.ts'
+import { USER_AGENT } from './sdk-info.ts'
 import type {
   TAPIResponse,
-  TEndpointProvider,
   THttpMethod,
   TRequestOptions,
   TRetryPolicy,
@@ -14,7 +14,6 @@ const DEFAULT_RETRY_POLICY: TRetryPolicy = {
   maximumDelayInMilliseconds: 1000,
 }
 const DEFAULT_TIMEOUT_IN_MILLISECONDS = 1500
-const DEFAULT_USER_AGENT = `openfuse-sdk/0.1.0`
 
 function sleep(milliseconds: number, abortSignal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -53,22 +52,22 @@ function combineAbortSignals(primary: AbortSignal, secondary?: AbortSignal): Abo
   return controller.signal
 }
 
-type TTransportOptions = {
-  endpointProvider: TEndpointProvider
+export type TTransportOptions = {
+  baseUrl: string
   tokenProvider: TTokenProvider
   retryPolicy?: TRetryPolicy
   fetchImplementation?: typeof fetch | undefined
 }
 
 export class Transport {
-  private endpointProvider: TEndpointProvider
+  private baseUrl: string
   private tokenProvider: TTokenProvider
   private retryPolicy: TRetryPolicy
-  private userAgent: string = DEFAULT_USER_AGENT
+  private userAgent: string = USER_AGENT
   private fetchImplementation?: typeof fetch
 
   constructor(options: TTransportOptions) {
-    this.endpointProvider = options.endpointProvider
+    this.baseUrl = options.baseUrl.replace(/\/$/, '')
     this.tokenProvider = options.tokenProvider
     this.retryPolicy = options.retryPolicy ?? DEFAULT_RETRY_POLICY
     this.fetchImplementation =
@@ -80,8 +79,7 @@ export class Transport {
     path: string,
     requestOptions: TRequestOptions = {},
   ): Promise<TResponse> {
-    const baseUrl: string = this.endpointProvider.getApiBase().replace(/\/$/, '')
-    const urlObject: URL = new URL(baseUrl + path)
+    const urlObject: URL = new URL(this.baseUrl + path)
 
     if (requestOptions.queryString) {
       for (const [queryKey, queryValue] of Object.entries(requestOptions.queryString)) {
