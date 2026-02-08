@@ -74,6 +74,10 @@ export class Transport {
       options.fetchImplementation ?? (globalThis as unknown as { fetch?: typeof fetch }).fetch
   }
 
+  setBaseUrl(baseUrl: string): void {
+    this.baseUrl = baseUrl.replace(/\/$/, '')
+  }
+
   async request<TResponse>(
     httpMethod: THttpMethod,
     path: string,

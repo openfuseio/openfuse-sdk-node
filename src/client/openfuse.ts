@@ -41,10 +41,10 @@ type TWithBreakerOptions<T> = {
 }
 
 export class Openfuse {
-  private readonly transport: Transport
+  protected readonly transport: Transport
   private readonly authApi: AuthApi
   private readonly tokenManager: TokenManager
-  private readonly baseUrl: string
+  protected readonly baseUrl: string
   private readonly systemSlug: string
   private readonly instanceId: string
   private readonly metricsApi: MetricsApi
@@ -52,7 +52,7 @@ export class Openfuse {
   private breakersFeature: BreakersFeature
   private metricsFeature: MetricsFeature
   private metricsConfig?: Partial<TMetricsConfig>
-  private bootstrapData?: TSdkBootstrapResponse
+  protected bootstrapData?: TSdkBootstrapResponse
 
   constructor(options: TOpenfuseOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, '')
