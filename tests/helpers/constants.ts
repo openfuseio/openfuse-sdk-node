@@ -3,7 +3,7 @@
  * Use these defaults across all tests for consistency.
  */
 export const TEST_CONFIG = {
-  baseUrl: 'https://api.test.com/v1',
+  baseUrl: 'https://api.test.com',
   clientId: 'test-client-id',
   clientSecret: 'test-client-secret',
   systemSlug: 'test-system',
