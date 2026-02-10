@@ -44,17 +44,4 @@ export class OpenfuseCloud extends Openfuse {
       instanceId: options.instanceId,
     })
   }
-
-  public override async bootstrap(): Promise<void> {
-    await super.bootstrap()
-
-    if (!this.bootstrapData) {
-      throw new Error('Bootstrap response missing after bootstrap()')
-    }
-
-    const { environment, company } = this.bootstrapData
-    const url = new URL(this.baseUrl)
-    url.hostname = `${environment.slug}-${company.slug}.${url.hostname}`
-    this.transport.setBaseUrl(url.origin)
-  }
 }

@@ -122,6 +122,12 @@ export class Openfuse {
       })
     }
 
+    // Update transport URL with environment-scoped hostname
+    const { environment, company } = response
+    const url = new URL(this.baseUrl)
+    url.hostname = `${environment.slug}-${company.slug}.${url.hostname}`
+    this.transport.setBaseUrl(url.origin)
+
     // Ingest breakers
     if (response.breakers && response.breakers.length > 0) {
       const breakers: TBreaker[] = response.breakers.map((b) => ({
