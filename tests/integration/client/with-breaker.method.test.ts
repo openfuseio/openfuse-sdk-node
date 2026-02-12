@@ -22,17 +22,17 @@ describe('Openfuse.withBreaker (enterprise semantics)', () => {
     vi.restoreAllMocks()
   })
 
-  describe('CLOSED → runs work', () => {
-    it('runs work when breaker is CLOSED (mapping seeded via bootstrap)', async () => {
+  describe('CLOSED -> runs work', () => {
+    it('runs work when breaker is CLOSED (mapping and state seeded via bootstrap)', async () => {
       const system = makeSystem()
       const breaker = makeBreaker({ state: 'closed' })
 
       const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [breaker] })
       mockAPI.auth.bootstrap.mockResolvedValueOnce(bootstrapResponse)
-      mockAPI.breakers.getBreaker.mockResolvedValue(breaker)
 
       const client = createTestClient({ systemSlug: system.slug })
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       const work = vi.fn(async () => 'ok')
       const result = await client.withBreaker(breaker.slug, work)
@@ -40,38 +40,37 @@ describe('Openfuse.withBreaker (enterprise semantics)', () => {
       expect(result).toBe('ok')
       expect(work).toHaveBeenCalledOnce()
       expect(mockAPI.breakers.listBreakers).not.toHaveBeenCalled()
-      expect(mockAPI.breakers.getBreaker).toHaveBeenCalledWith(
-        bootstrapResponse.system.id,
-        breaker.id,
-        undefined,
-      )
+      expect(mockAPI.breakers.getBreaker).not.toHaveBeenCalled()
     })
 
-    it('forwards AbortSignal through isOpen → getBreaker', async () => {
+    it('does not forward AbortSignal into coalesced getBreaker (signal isolation)', async () => {
       const system = makeSystem()
       const breaker = makeBreaker({ state: 'closed' })
 
-      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [breaker] })
+      // Bootstrap without breakers so state must be fetched from API
+      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [] })
       mockAPI.auth.bootstrap.mockResolvedValueOnce(bootstrapResponse)
+      mockAPI.breakers.listBreakers.mockResolvedValue([breaker])
       mockAPI.breakers.getBreaker.mockResolvedValue(breaker)
 
       const client = createTestClient({ systemSlug: system.slug })
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       const ac = new AbortController()
       const work = vi.fn(async () => 'ok')
       const result = await client.withBreaker(breaker.slug, work, { signal: ac.signal })
 
       expect(result).toBe('ok')
+      // Signal is NOT forwarded to the coalesced getBreaker work (signal isolation)
       expect(mockAPI.breakers.getBreaker).toHaveBeenCalledWith(
         bootstrapResponse.system.id,
         breaker.id,
-        ac.signal,
       )
     })
   })
 
-  describe('OPEN → onOpen or CircuitOpenError (do NOT fall back to onUnknown)', () => {
+  describe('OPEN -> onOpen or CircuitOpenError (do NOT fall back to onUnknown)', () => {
     it('calls onOpen when breaker is OPEN', async () => {
       const system = makeSystem()
       const breaker = makeBreaker({ state: 'open' })
@@ -81,7 +80,8 @@ describe('Openfuse.withBreaker (enterprise semantics)', () => {
       mockAPI.breakers.getBreaker.mockResolvedValue(makeBreaker({ state: 'open' }))
 
       const client = createTestClient({ systemSlug: system.slug })
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       const work = vi.fn(async () => 'ok')
       const onOpen = vi.fn(async () => 'fallback')
@@ -101,7 +101,8 @@ describe('Openfuse.withBreaker (enterprise semantics)', () => {
       mockAPI.breakers.getBreaker.mockResolvedValue(makeBreaker({ state: 'open' }))
 
       const client = createTestClient({ systemSlug: system.slug })
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       const work = vi.fn(async () => 'ok')
       const onUnknown = vi.fn(async () => 'unknown')
@@ -123,7 +124,8 @@ describe('Openfuse.withBreaker (enterprise semantics)', () => {
       mockAPI.breakers.getBreaker.mockResolvedValue(makeBreaker({ state: 'open' }))
 
       const client = createTestClient({ systemSlug: system.slug })
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       const onOpenErr = new Error('onOpen failed')
 
@@ -142,17 +144,20 @@ describe('Openfuse.withBreaker (enterprise semantics)', () => {
     })
   })
 
-  describe('UNKNOWN → fail-open (state errors)', () => {
-    it('state fetch error → uses onUnknown if provided', async () => {
+  describe('UNKNOWN -> fail-open (state errors)', () => {
+    it('state fetch error -> uses onUnknown if provided', async () => {
       const system = makeSystem()
       const breaker = makeBreaker()
 
-      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [breaker] })
+      // Bootstrap without breakers so state must be fetched from API
+      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [] })
       mockAPI.auth.bootstrap.mockResolvedValueOnce(bootstrapResponse)
+      mockAPI.breakers.listBreakers.mockResolvedValue([breaker])
       mockAPI.breakers.getBreaker.mockRejectedValue(new Error('state down'))
 
       const client = createTestClient({ systemSlug: system.slug })
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       const work = vi.fn(async () => 'ok')
       const onUnknown = vi.fn(async () => 'unknown')
@@ -163,44 +168,51 @@ describe('Openfuse.withBreaker (enterprise semantics)', () => {
       expect(work).not.toHaveBeenCalled()
     })
 
-    it('state fetch error -> falls back to onOpen if no onUnknown', async () => {
+    it('state fetch error -> executes fn() (fail-open) when no onUnknown', async () => {
       const system = makeSystem()
       const breaker = makeBreaker()
 
-      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [breaker] })
+      // Bootstrap without breakers so state must be fetched from API
+      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [] })
       mockAPI.auth.bootstrap.mockResolvedValueOnce(bootstrapResponse)
+      mockAPI.breakers.listBreakers.mockResolvedValue([breaker])
       mockAPI.breakers.getBreaker.mockRejectedValue(new Error('state down'))
 
       const client = createTestClient({ systemSlug: system.slug })
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       const work = vi.fn(async () => 'ok')
       const onOpen = vi.fn(async () => 'fallback')
       const res = await client.withBreaker(breaker.slug, work, { onOpen })
 
-      expect(res).toBe('fallback')
-      expect(onOpen).toHaveBeenCalledOnce()
-      expect(work).not.toHaveBeenCalled()
+      expect(res).toBe('ok')
+      expect(work).toHaveBeenCalledOnce()
+      expect(onOpen).not.toHaveBeenCalled()
     })
 
-    it('state fetch error → throws CircuitOpenError if no callbacks (fail-open)', async () => {
+    it('state fetch error -> executes fn() (fail-open) when no callbacks at all', async () => {
       const system = makeSystem()
       const breaker = makeBreaker()
 
-      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [breaker] })
+      // Bootstrap without breakers so state must be fetched from API
+      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [] })
       mockAPI.auth.bootstrap.mockResolvedValueOnce(bootstrapResponse)
+      mockAPI.breakers.listBreakers.mockResolvedValue([breaker])
       mockAPI.breakers.getBreaker.mockRejectedValue(new Error('state down'))
 
       const client = createTestClient({ systemSlug: system.slug })
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       const work = vi.fn(async () => 'ok')
+      const res = await client.withBreaker(breaker.slug, work)
 
-      await expect(client.withBreaker(breaker.slug, work)).rejects.toBeInstanceOf(CircuitOpenError)
-      expect(work).not.toHaveBeenCalled()
+      expect(res).toBe('ok')
+      expect(work).toHaveBeenCalledOnce()
     })
 
-    it('work throws → rethrows (do NOT use onUnknown for work failures)', async () => {
+    it('work throws -> rethrows (do NOT use onUnknown for work failures)', async () => {
       const system = makeSystem()
       const breaker = makeBreaker({ state: 'closed' })
 
@@ -209,7 +221,8 @@ describe('Openfuse.withBreaker (enterprise semantics)', () => {
       mockAPI.breakers.getBreaker.mockResolvedValue(makeBreaker({ state: 'closed' }))
 
       const client = createTestClient({ systemSlug: system.slug })
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       const workErr = new Error('work failed')
 
@@ -237,7 +250,8 @@ describe('Openfuse.withBreaker (enterprise semantics)', () => {
       mockAPI.breakers.getBreaker.mockResolvedValue(makeBreaker({ state: 'closed' }))
 
       const client = createTestClient({ systemSlug: system.slug })
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       const slowWork = vi.fn(async () => {
         await new Promise((r) => setTimeout(r, 100))
@@ -260,7 +274,8 @@ describe('Openfuse.withBreaker (enterprise semantics)', () => {
       mockAPI.breakers.getBreaker.mockResolvedValue(makeBreaker({ state: 'closed' }))
 
       const client = createTestClient({ systemSlug: system.slug })
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       const fastWork = vi.fn(async () => {
         await new Promise((r) => setTimeout(r, 5))
@@ -275,30 +290,32 @@ describe('Openfuse.withBreaker (enterprise semantics)', () => {
   })
 
   describe('mapping & state cache', () => {
-    it('with mapping from bootstrap: no listBreakers call', async () => {
+    it('with mapping and state from bootstrap: no listBreakers or getBreaker call', async () => {
       const system = makeSystem()
       const breaker = makeBreaker({ state: 'closed' })
 
       const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [breaker] })
       mockAPI.auth.bootstrap.mockResolvedValueOnce(bootstrapResponse)
-      mockAPI.breakers.getBreaker.mockResolvedValue(makeBreaker({ state: 'closed' }))
 
       const client = createTestClient({ systemSlug: system.slug })
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       const work = vi.fn(async () => 'ok')
       await client.withBreaker(breaker.slug, work)
 
       expect(mockAPI.breakers.listBreakers).not.toHaveBeenCalled()
-      expect(mockAPI.breakers.getBreaker).toHaveBeenCalledTimes(1)
+      expect(mockAPI.breakers.getBreaker).not.toHaveBeenCalled()
     })
 
     it('coalesces concurrent calls (single getBreaker due to inflight merging)', async () => {
       const system = makeSystem()
       const breaker = makeBreaker({ state: 'closed' })
 
-      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [breaker] })
+      // Bootstrap without breakers so state must be fetched from API
+      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [] })
       mockAPI.auth.bootstrap.mockResolvedValueOnce(bootstrapResponse)
+      mockAPI.breakers.listBreakers.mockResolvedValue([breaker])
 
       mockAPI.breakers.getBreaker.mockImplementationOnce(async () => {
         await new Promise((r) => setTimeout(r, 15))
@@ -306,7 +323,8 @@ describe('Openfuse.withBreaker (enterprise semantics)', () => {
       })
 
       const client = createTestClient({ systemSlug: system.slug })
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       const work = vi.fn(async () => 'ok')
       const [a, b, c] = await Promise.all([
@@ -338,7 +356,8 @@ describe('Openfuse.withBreaker (enterprise semantics)', () => {
         systemSlug: system.slug,
         metrics: { windowSizeMs: 100, flushIntervalMs: 10_000 },
       })
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       const work = vi.fn(async () => 'ok')
       await client.withBreaker(breaker.slug, work)
@@ -380,7 +399,8 @@ describe('Openfuse.withBreaker (enterprise semantics)', () => {
         systemSlug: system.slug,
         metrics: { windowSizeMs: 100, flushIntervalMs: 10_000 },
       })
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       const workErr = new Error('work failed')
       const work = vi.fn(async () => {
@@ -421,7 +441,8 @@ describe('Openfuse.withBreaker (enterprise semantics)', () => {
         systemSlug: system.slug,
         metrics: { windowSizeMs: 100, flushIntervalMs: 10_000 },
       })
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       const slowWork = vi.fn(async () => {
         await new Promise((r) => setTimeout(r, 100))
@@ -464,7 +485,8 @@ describe('Openfuse.withBreaker (enterprise semantics)', () => {
         systemSlug: system.slug,
         metrics: { windowSizeMs: 100, flushIntervalMs: 10_000 },
       })
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       const work = vi.fn(async () => {
         await new Promise((r) => setTimeout(r, 10))
@@ -504,7 +526,8 @@ describe('Openfuse.withBreaker (enterprise semantics)', () => {
         systemSlug: system.slug,
         metrics: { windowSizeMs: 100, flushIntervalMs: 10_000 },
       })
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       const work = vi.fn(async () => 'ok')
       const onOpen = vi.fn(async () => 'fallback')
@@ -514,6 +537,91 @@ describe('Openfuse.withBreaker (enterprise semantics)', () => {
       await client.flushMetrics()
 
       expect(mockAPI.metrics.ingest).not.toHaveBeenCalled()
+      expect(work).not.toHaveBeenCalled()
+
+      client.stopMetrics()
+    })
+  })
+
+  describe('state fetch budget', () => {
+    it('fails-open when state fetch exceeds 500ms budget', async () => {
+      const system = makeSystem()
+      const breaker = makeBreaker({ state: 'closed' })
+
+      // Bootstrap without breakers so state must be fetched from API
+      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [] })
+      mockAPI.auth.bootstrap.mockResolvedValueOnce(bootstrapResponse)
+      mockAPI.breakers.listBreakers.mockResolvedValue([breaker])
+
+      // Simulate slow API - takes 2 seconds
+      mockAPI.breakers.getBreaker.mockImplementation(
+        () => new Promise((resolve) => setTimeout(() => resolve(breaker), 2000)),
+      )
+
+      const client = createTestClient({ systemSlug: system.slug })
+      client.bootstrap()
+      await client.whenReady()
+
+      const work = vi.fn(async () => 'ok')
+      const result = await client.withBreaker(breaker.slug, work)
+
+      // Should fail-open and execute work
+      expect(result).toBe('ok')
+      expect(work).toHaveBeenCalledOnce()
+
+      client.stopMetrics()
+    })
+
+    it('uses onUnknown when state fetch exceeds budget and onUnknown is provided', async () => {
+      const system = makeSystem()
+      const breaker = makeBreaker({ state: 'closed' })
+
+      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [] })
+      mockAPI.auth.bootstrap.mockResolvedValueOnce(bootstrapResponse)
+      mockAPI.breakers.listBreakers.mockResolvedValue([breaker])
+
+      // Simulate slow API
+      mockAPI.breakers.getBreaker.mockImplementation(
+        () => new Promise((resolve) => setTimeout(() => resolve(breaker), 2000)),
+      )
+
+      const client = createTestClient({ systemSlug: system.slug })
+      client.bootstrap()
+      await client.whenReady()
+
+      const work = vi.fn(async () => 'ok')
+      const onUnknown = vi.fn(async () => 'unknown-fallback')
+      const result = await client.withBreaker(breaker.slug, work, { onUnknown })
+
+      expect(result).toBe('unknown-fallback')
+      expect(onUnknown).toHaveBeenCalledOnce()
+      expect(work).not.toHaveBeenCalled()
+
+      client.stopMetrics()
+    })
+
+    it('returns state normally when fetch completes within budget', async () => {
+      const system = makeSystem()
+      const breaker = makeBreaker({ state: 'open' })
+
+      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [] })
+      mockAPI.auth.bootstrap.mockResolvedValueOnce(bootstrapResponse)
+      mockAPI.breakers.listBreakers.mockResolvedValue([breaker])
+
+      // Fast API response
+      mockAPI.breakers.getBreaker.mockResolvedValue(breaker)
+
+      const client = createTestClient({ systemSlug: system.slug })
+      client.bootstrap()
+      await client.whenReady()
+
+      const work = vi.fn(async () => 'ok')
+      const onOpen = vi.fn(async () => 'open-fallback')
+      const result = await client.withBreaker(breaker.slug, work, { onOpen })
+
+      // State was fetched successfully within budget, breaker is open -> onOpen called
+      expect(result).toBe('open-fallback')
+      expect(onOpen).toHaveBeenCalledOnce()
       expect(work).not.toHaveBeenCalled()
 
       client.stopMetrics()

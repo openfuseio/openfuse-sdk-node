@@ -23,7 +23,8 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: withBreaker()', () => {
 
   beforeEach(async () => {
     client = ctx.createSDKClient()
-    await client.bootstrap()
+    client.bootstrap()
+    await client.whenReady()
   })
 
   afterEach(async () => {
@@ -242,7 +243,8 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: withBreaker() - concurrent execu
 
   it('should handle concurrent withBreaker calls', async () => {
     const client = ctx.createSDKClient()
-    await client.bootstrap()
+    client.bootstrap()
+    await client.whenReady()
 
     const closedBreaker = ctx.breakers[0]
 

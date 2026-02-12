@@ -1,8 +1,8 @@
-export type TTokenProvider = {
-  /** Returns a bearer token. Implementations may cache and rotate tokens. */
-  getToken(signal?: AbortSignal): Promise<string>
-  /** Clears any cached token, forcing the next getToken() to fetch fresh. */
-  clearCache?(): void
+export type TAuthProvider = {
+  /** Returns auth headers (e.g. `{ authorization: 'Bearer ...' }`). */
+  getAuthHeaders(signal?: AbortSignal): Promise<Record<string, string>>
+  /** Called on 401/403 to allow token rotation. If absent, auth errors throw immediately without retry. */
+  onAuthFailure?(): void
 }
 
 export type THttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
@@ -13,6 +13,7 @@ export type TRequestOptions = {
   signal?: AbortSignal
   timeoutInMilliseconds?: number
   headers?: Record<string, string>
+  retryPolicy?: TRetryPolicy
 }
 
 export type TRetryPolicy = {

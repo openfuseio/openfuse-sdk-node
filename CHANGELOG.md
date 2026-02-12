@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 - **BREAKING:** Simplified `OpenfuseCloud` constructor options
 
   Before:
+
   ```ts
   new OpenfuseCloud({
     region: 'us',
@@ -21,6 +22,7 @@ All notable changes to this project will be documented in this file.
   ```
 
   After:
+
   ```ts
   new OpenfuseCloud({
     systemSlug: 'checkout',
@@ -32,6 +34,7 @@ All notable changes to this project will be documented in this file.
 - **BREAKING:** Simplified `Openfuse` constructor options (self-hosted)
 
   Before:
+
   ```ts
   new Openfuse({
     endpointProvider: ...,
@@ -41,6 +44,7 @@ All notable changes to this project will be documented in this file.
   ```
 
   After:
+
   ```ts
   new Openfuse({
     baseUrl: 'https://your-api.openfuse.io',

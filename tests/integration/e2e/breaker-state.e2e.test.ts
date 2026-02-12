@@ -23,7 +23,8 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: breaker state operations', () =>
 
   beforeEach(async () => {
     client = ctx.createSDKClient()
-    await client.bootstrap()
+    client.bootstrap()
+    await client.whenReady()
   })
 
   afterEach(async () => {
@@ -51,16 +52,6 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: breaker state operations', () =>
       const nonExistentSlug = uniqueSlug('non-existent-breaker')
 
       await expect(client.isOpen(nonExistentSlug)).rejects.toThrow(NotFoundError)
-    })
-
-    it('should support AbortSignal', async () => {
-      const breaker = ctx.breakers[0]
-      const controller = new AbortController()
-
-      // Abort immediately
-      controller.abort()
-
-      await expect(client.isOpen(breaker.slug, controller.signal)).rejects.toThrow()
     })
   })
 
@@ -162,7 +153,8 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: state changes via API', () => {
 
   it('should reflect state changes made via API', async () => {
     const client = ctx.createSDKClient()
-    await client.bootstrap()
+    client.bootstrap()
+    await client.whenReady()
 
     const testBreaker = ctx.breakers[0]
 
@@ -195,7 +187,8 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: cache behavior', () => {
 
   it('should cache state queries for performance', async () => {
     const client = ctx.createSDKClient()
-    await client.bootstrap()
+    client.bootstrap()
+    await client.whenReady()
 
     const testBreaker = ctx.breakers[0]
 
@@ -215,7 +208,8 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: cache behavior', () => {
 
   it('should refresh cache after invalidate()', async () => {
     const client = ctx.createSDKClient()
-    await client.bootstrap()
+    client.bootstrap()
+    await client.whenReady()
 
     const testBreaker = ctx.breakers[0]
 

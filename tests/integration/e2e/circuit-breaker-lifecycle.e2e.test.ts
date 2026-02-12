@@ -190,7 +190,8 @@ describe.skipIf(!canRunTests('failure-rate'))('E2E: Circuit Breaker Lifecycle', 
     'should trip breaker when failure rate exceeds threshold',
     async () => {
       const client = createSDKClient(system.slug)
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       try {
         expect(await client.isOpen(breaker.slug)).toBe(false)
@@ -218,7 +219,8 @@ describe.skipIf(!canRunTests('failure-rate'))('E2E: Circuit Breaker Lifecycle', 
     'should transition to half-open after probe interval',
     async () => {
       const client = createSDKClient(system.slug)
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       try {
         client.invalidate()
@@ -270,7 +272,8 @@ describe.skipIf(!canRunTests('failure-rate'))('E2E: Circuit Breaker Lifecycle', 
     'should close breaker after successful probe in half-open state',
     async () => {
       const client = createSDKClient(system.slug)
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       try {
         await apiClient.updateBreakerState(system.id, breaker.id, 'closed', 'E2E test reset')
@@ -304,7 +307,8 @@ describe.skipIf(!canRunTests('failure-rate'))('E2E: Circuit Breaker - onOpen fal
     'should call onOpen fallback when breaker trips',
     async () => {
       const client = createSDKClient(system.slug)
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       try {
         await triggerFailures(client, breaker.slug, 5)
@@ -353,7 +357,8 @@ describe.skipIf(!canRunTests('latency-p95'))('E2E: Circuit Breaker - Latency p95
     'should trip breaker when latency p95 exceeds threshold',
     async () => {
       const client = createSDKClient(system.slug)
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       try {
         expect(await client.withBreaker(breaker.slug, async () => 'fast')).toBe('fast')
@@ -428,7 +433,8 @@ describe.skipIf(!canRunTests('failure-rate'))(
       'should block calls after failures trip the breaker',
       async () => {
         const client = createSDKClient(system.slug)
-        await client.bootstrap()
+        client.bootstrap()
+        await client.whenReady()
 
         try {
           expect(await client.withBreaker(breaker.slug, async () => 'initial-success')).toBe(

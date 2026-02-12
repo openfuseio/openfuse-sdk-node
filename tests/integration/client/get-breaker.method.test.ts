@@ -29,7 +29,8 @@ describe('Openfuse.getBreaker', () => {
       mockAPI.breakers.getBreaker.mockResolvedValue(breaker)
 
       const client = createTestClient({ systemSlug: system.slug })
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       const a = await client.getBreaker(breaker.slug)
       const b = await client.getBreaker(breaker.slug)
@@ -65,17 +66,15 @@ describe('Openfuse.getBreaker', () => {
       mockAPI.breakers.getBreaker.mockResolvedValue(breaker)
 
       const client = createTestClient({ systemSlug: system.slug })
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       await client.getBreaker(breaker.slug)
       await client.invalidate()
 
       const again = await client.getBreaker(breaker.slug)
       expect(again).toEqual(breaker)
-      expect(mockAPI.breakers.listBreakers).toHaveBeenCalledWith(
-        bootstrapResponse.system.id,
-        undefined,
-      )
+      expect(mockAPI.breakers.listBreakers).toHaveBeenCalledWith(bootstrapResponse.system.id)
       expect(mockAPI.breakers.getBreaker).toHaveBeenCalledTimes(2)
     })
   })
@@ -90,7 +89,8 @@ describe('Openfuse.getBreaker', () => {
       mockAPI.breakers.getBreaker.mockResolvedValue(breaker)
 
       const client = createTestClient({ systemSlug: system.slug })
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       const ac = new AbortController()
       const model = await client.getBreaker(breaker.slug, ac.signal)
@@ -104,7 +104,7 @@ describe('Openfuse.getBreaker', () => {
   })
 
   describe('API down (no model cache fallback)', () => {
-    it('throws when getBreaker fails (mapping available)', async () => {
+    it('returns null when getBreaker fails (mapping available)', async () => {
       const system = makeSystem()
       const breaker = makeBreaker()
 
@@ -113,10 +113,20 @@ describe('Openfuse.getBreaker', () => {
       mockAPI.breakers.getBreaker.mockRejectedValue(new Error('down'))
 
       const client = createTestClient({ systemSlug: system.slug })
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
-      await expect(client.getBreaker(breaker.slug)).rejects.toThrow('down')
+      const result = await client.getBreaker(breaker.slug)
+      expect(result).toBeNull()
       expect(mockAPI.breakers.listBreakers).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('before bootstrap', () => {
+    it('returns null when called before bootstrap()', async () => {
+      const client = createTestClient()
+      const result = await client.getBreaker('any-breaker')
+      expect(result).toBeNull()
     })
   })
 })

@@ -29,7 +29,9 @@ const client = new OpenfuseCloud({
 
 await client.bootstrap()
 
-const recommendations = await client.withBreaker('recommendations', () => fetchRecommendations(userId),
+const recommendations = await client.withBreaker(
+  'recommendations',
+  () => fetchRecommendations(userId),
   { onOpen: () => [] },
 )
 ```

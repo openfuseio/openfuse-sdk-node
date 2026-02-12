@@ -29,7 +29,8 @@ describe('Openfuse.listBreakers', () => {
       mockAPI.breakers.listBreakers.mockResolvedValueOnce([breaker])
 
       const client = createTestClient({ systemSlug: system.slug })
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       const list = await client.listBreakers()
       expect(list).toEqual([breaker])
@@ -49,7 +50,8 @@ describe('Openfuse.listBreakers', () => {
       mockAPI.breakers.listBreakers.mockResolvedValueOnce([a]).mockResolvedValueOnce([b])
 
       const client = createTestClient({ systemSlug: system.slug })
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       const first = await client.listBreakers()
       const second = await client.listBreakers()
@@ -57,6 +59,14 @@ describe('Openfuse.listBreakers', () => {
       expect(first).toEqual([a])
       expect(second).toEqual([b])
       expect(mockAPI.breakers.listBreakers).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  describe('before bootstrap', () => {
+    it('returns empty array when called before bootstrap() (fail-open)', async () => {
+      const client = createTestClient()
+      const result = await client.listBreakers()
+      expect(result).toEqual([])
     })
   })
 })

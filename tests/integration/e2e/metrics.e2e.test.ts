@@ -21,7 +21,8 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: metrics collection', () => {
 
   beforeEach(async () => {
     client = ctx.createSDKClient()
-    await client.bootstrap()
+    client.bootstrap()
+    await client.whenReady()
   })
 
   afterEach(async () => {
@@ -94,7 +95,8 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: metrics collection', () => {
   describe('shutdown()', () => {
     it('should complete without error', async () => {
       const shutdownClient = ctx.createSDKClient()
-      await shutdownClient.bootstrap()
+      shutdownClient.bootstrap()
+      await shutdownClient.whenReady()
 
       const breaker = ctx.breakers[0]
 
@@ -107,7 +109,8 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: metrics collection', () => {
 
     it('should allow operations after shutdown', async () => {
       const shutdownClient = ctx.createSDKClient()
-      await shutdownClient.bootstrap()
+      shutdownClient.bootstrap()
+      await shutdownClient.whenReady()
 
       await shutdownClient.shutdown()
 
@@ -126,7 +129,8 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: metrics - breaker not found', ()
 
   it('should handle flush gracefully', async () => {
     const client = ctx.createSDKClient()
-    await client.bootstrap()
+    client.bootstrap()
+    await client.whenReady()
 
     // Execute operation and flush - should not throw
     await client.withBreaker(ctx.breakers[0].slug, async () => 'test')

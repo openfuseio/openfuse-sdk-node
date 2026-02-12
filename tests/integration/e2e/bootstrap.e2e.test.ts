@@ -18,14 +18,16 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: bootstrap()', () => {
       const client = ctx.createSDKClient()
 
       // Bootstrap should complete without errors
-      await expect(client.bootstrap()).resolves.not.toThrow()
+      expect(() => client.bootstrap()).not.toThrow()
+      await client.whenReady()
 
       await client.shutdown()
     })
 
     it('should populate breaker cache after bootstrap', async () => {
       const client = ctx.createSDKClient()
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       // After bootstrap, listing breakers should return cached data
       const breakers = await client.listBreakers()
@@ -45,7 +47,8 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: bootstrap()', () => {
 
     it('should allow state queries immediately after bootstrap', async () => {
       const client = ctx.createSDKClient()
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       // State queries should work immediately
       const testBreaker = ctx.breakers[0]
@@ -59,7 +62,8 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: bootstrap()', () => {
 
     it('should resolve system slug to ID during bootstrap', async () => {
       const client = ctx.createSDKClient()
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       // Getting a breaker by slug should work (requires slug->ID resolution)
       const testBreaker = ctx.breakers[0]
@@ -77,8 +81,9 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: bootstrap()', () => {
       const nonExistentSlug = uniqueSlug('non-existent-system')
       const client = createSDKClient(nonExistentSlug)
 
-      // Bootstrap with invalid system should fail
-      await expect(client.bootstrap()).rejects.toThrow()
+      // Bootstrap with invalid system should fail-open (errors are logged, not thrown)
+      client.bootstrap()
+      await client.whenReady()
 
       await client.shutdown()
     })
@@ -89,11 +94,13 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: bootstrap()', () => {
       const client = ctx.createSDKClient()
 
       // First bootstrap
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
       const breakers1 = await client.listBreakers()
 
       // Second bootstrap (should refresh data)
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
       const breakers2 = await client.listBreakers()
 
       expect(breakers1.length).toBe(breakers2.length)
@@ -108,7 +115,8 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: bootstrap()', () => {
       const client = ctx.createSDKClient()
 
       // First API call (bootstrap) should trigger auth
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       // Subsequent calls should use cached token
       const breakers = await client.listBreakers()
@@ -130,8 +138,9 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: bootstrap() - auth errors', () =
       clientSecret: 'invalid-client-secret',
     })
 
-    // Bootstrap with invalid credentials should fail with auth error
-    await expect(client.bootstrap()).rejects.toThrow()
+    // Bootstrap with invalid credentials logs auth error (fail-safe, does not throw)
+    client.bootstrap()
+    await client.whenReady()
 
     await client.shutdown()
   })

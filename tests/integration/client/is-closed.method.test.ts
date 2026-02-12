@@ -24,14 +24,17 @@ describe('Openfuse.isClosed', () => {
       const system = makeSystem()
       const breaker = makeBreaker({ state: 'closed' })
 
-      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [breaker] })
+      // Bootstrap without breakers so state must be fetched from API
+      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [] })
       mockAPI.auth.bootstrap.mockResolvedValueOnce(bootstrapResponse)
+      mockAPI.breakers.listBreakers.mockResolvedValue([breaker])
       mockAPI.breakers.getBreaker.mockResolvedValueOnce(
         makeBreaker({ ...breaker, state: 'closed' }),
       )
 
       const client = createTestClient({ systemSlug: system.slug })
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       expect(await client.isClosed(breaker.slug)).toBe(true)
       expect(await client.isClosed(breaker.slug)).toBe(true)
@@ -40,31 +43,32 @@ describe('Openfuse.isClosed', () => {
       expect(mockAPI.breakers.getBreaker).toHaveBeenCalledWith(
         bootstrapResponse.system.id,
         breaker.id,
-        undefined,
       )
     })
   })
 
-  describe('signal', () => {
-    it('forwards AbortSignal to getBreaker', async () => {
+  describe('signal isolation', () => {
+    it('getBreaker is called without AbortSignal (coalesced call is signal-isolated)', async () => {
       const system = makeSystem()
       const breaker = makeBreaker({ state: 'closed' })
 
-      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [breaker] })
+      // Bootstrap without breakers so state must be fetched from API
+      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [] })
       mockAPI.auth.bootstrap.mockResolvedValueOnce(bootstrapResponse)
+      mockAPI.breakers.listBreakers.mockResolvedValue([breaker])
       mockAPI.breakers.getBreaker.mockResolvedValueOnce(
         makeBreaker({ ...breaker, state: 'closed' }),
       )
 
       const client = createTestClient({ systemSlug: system.slug })
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
-      const ac = new AbortController()
-      await client.isClosed(breaker.slug, ac.signal)
+      await client.isClosed(breaker.slug)
+      // Signal is NOT forwarded to the coalesced getBreaker work (signal isolation)
       expect(mockAPI.breakers.getBreaker).toHaveBeenCalledWith(
         bootstrapResponse.system.id,
         breaker.id,
-        ac.signal,
       )
     })
   })
@@ -74,14 +78,17 @@ describe('Openfuse.isClosed', () => {
       const system = makeSystem()
       const breaker = makeBreaker({ state: 'closed' })
 
-      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [breaker] })
+      // Bootstrap without breakers so state must be fetched from API
+      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [] })
       mockAPI.auth.bootstrap.mockResolvedValueOnce(bootstrapResponse)
+      mockAPI.breakers.listBreakers.mockResolvedValue([breaker])
       mockAPI.breakers.getBreaker.mockResolvedValueOnce(
         makeBreaker({ ...breaker, state: 'closed' }),
       )
 
       const client = createTestClient({ systemSlug: system.slug })
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
       expect(await client.isClosed(breaker.slug)).toBe(true)
       mockAPI.breakers.getBreaker.mockRejectedValueOnce(new Error('down'))
@@ -89,18 +96,28 @@ describe('Openfuse.isClosed', () => {
       expect(mockAPI.breakers.getBreaker).toHaveBeenCalledTimes(1)
     })
 
-    it('throws when API fails and no cached state exists', async () => {
+    it('returns true (fail-open) when API fails and no cached state exists', async () => {
       const system = makeSystem()
       const breaker = makeBreaker()
 
-      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [breaker] })
+      // Bootstrap without breakers so no state is cached
+      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [] })
       mockAPI.auth.bootstrap.mockResolvedValueOnce(bootstrapResponse)
+      mockAPI.breakers.listBreakers.mockResolvedValue([breaker])
       mockAPI.breakers.getBreaker.mockRejectedValueOnce(new Error('down'))
 
       const client = createTestClient({ systemSlug: system.slug })
-      await client.bootstrap()
+      client.bootstrap()
+      await client.whenReady()
 
-      await expect(client.isClosed(breaker.slug)).rejects.toThrow()
+      expect(await client.isClosed(breaker.slug)).toBe(true)
+    })
+  })
+
+  describe('before bootstrap', () => {
+    it('returns true (fail-open) when called before bootstrap', async () => {
+      const client = createTestClient()
+      expect(await client.isClosed('any-breaker')).toBe(true)
     })
   })
 })

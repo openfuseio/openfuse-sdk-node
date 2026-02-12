@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { AuthError } from '../../../../src/core/errors.ts'
+import { AbortOperationError, AuthError } from '../../../../src/core/errors.ts'
 import { TokenManager } from '../../../../src/domains/auth/token-manager.ts'
 import { createMockAuthApi } from '../../../helpers/index.ts'
 
@@ -55,8 +55,8 @@ describe('TokenManager', () => {
     })
   })
 
-  describe('getToken - proactive refresh', () => {
-    it('triggers refresh when token is within refresh buffer', async () => {
+  describe('getToken - proactive refresh (non-blocking)', () => {
+    it('returns old token immediately when within refresh buffer', async () => {
       tokenManager.setToken('old-token', 25) // 25 seconds (within 30s buffer)
       vi.mocked(authApi.refreshToken).mockResolvedValueOnce({
         accessToken: 'new-token',
@@ -66,11 +66,31 @@ describe('TokenManager', () => {
 
       const token = await tokenManager.getToken()
 
-      expect(token).toBe('new-token')
-      expect(authApi.refreshToken).toHaveBeenCalledTimes(1)
+      // Returns old token immediately — refresh happens in background
+      expect(token).toBe('old-token')
     })
 
-    it('triggers refresh when token is expired', async () => {
+    it('triggers background refresh when within refresh buffer', async () => {
+      tokenManager.setToken('old-token', 25)
+      vi.mocked(authApi.refreshToken).mockResolvedValueOnce({
+        accessToken: 'new-token',
+        tokenType: 'Bearer',
+        expiresIn: 3600,
+      })
+
+      await tokenManager.getToken()
+
+      // Let background refresh complete
+      await vi.advanceTimersByTimeAsync(100)
+
+      expect(authApi.refreshToken).toHaveBeenCalledTimes(1)
+
+      // Next call should get the refreshed token
+      const token2 = await tokenManager.getToken()
+      expect(token2).toBe('new-token')
+    })
+
+    it('triggers refresh and blocks when token is fully expired', async () => {
       tokenManager.setToken('old-token', 3600)
       vi.advanceTimersByTime(3600 * 1000 + 1000) // Advance past expiry
 
@@ -85,11 +105,29 @@ describe('TokenManager', () => {
       expect(token).toBe('new-token')
       expect(authApi.refreshToken).toHaveBeenCalledTimes(1)
     })
+
+    it('warns but does not throw on background refresh failures when token is not expired', async () => {
+      tokenManager.setToken('old-token', 25)
+      vi.mocked(authApi.refreshToken)
+        .mockRejectedValueOnce(new Error('Network error'))
+        .mockRejectedValueOnce(new Error('Network error'))
+        .mockRejectedValueOnce(new Error('Network error'))
+
+      const token = await tokenManager.getToken()
+      expect(token).toBe('old-token')
+
+      // Let background refresh complete (with failures)
+      await vi.advanceTimersByTimeAsync(5000)
+
+      // No crash, no thrown error
+      expect(authApi.refreshToken).toHaveBeenCalled()
+    })
   })
 
   describe('getToken - retry logic', () => {
     it('retries on transient failure and succeeds', async () => {
-      tokenManager.setToken('old-token', 10)
+      tokenManager.setToken('old-token', 3600)
+      vi.advanceTimersByTime(3600 * 1000 + 1000) // Fully expired
 
       vi.mocked(authApi.refreshToken)
         .mockRejectedValueOnce(new Error('Network error'))
@@ -114,35 +152,13 @@ describe('TokenManager', () => {
     })
 
     it('does not retry on AuthError (invalid credentials)', async () => {
-      tokenManager.setToken('old-token', 10)
+      tokenManager.setToken('old-token', 3600)
+      vi.advanceTimersByTime(3600 * 1000 + 1000) // Fully expired
 
       vi.mocked(authApi.refreshToken).mockRejectedValueOnce(new AuthError('Invalid credentials'))
 
       await expect(tokenManager.getToken()).rejects.toThrow(AuthError)
       expect(authApi.refreshToken).toHaveBeenCalledTimes(1)
-    })
-
-    it('falls back to old token if refresh fails but token not fully expired', async () => {
-      // Token expires in 20 seconds, within 30s buffer but not fully expired
-      tokenManager.setToken('old-token', 20)
-
-      vi.mocked(authApi.refreshToken)
-        .mockRejectedValueOnce(new Error('Network error'))
-        .mockRejectedValueOnce(new Error('Network error'))
-        .mockRejectedValueOnce(new Error('Network error'))
-
-      const tokenPromise = tokenManager.getToken()
-
-      // Advance through all retries
-      await vi.advanceTimersByTimeAsync(150)
-      await vi.advanceTimersByTimeAsync(300)
-      await vi.advanceTimersByTimeAsync(600)
-
-      const token = await tokenPromise
-
-      // Should fall back to old token since it's not fully expired
-      expect(token).toBe('old-token')
-      expect(authApi.refreshToken).toHaveBeenCalledTimes(3)
     })
 
     it('throws when refresh fails and token is fully expired', async () => {
@@ -178,7 +194,8 @@ describe('TokenManager', () => {
 
   describe('getToken - request coalescing', () => {
     it('coalesces concurrent refresh requests into single API call', async () => {
-      tokenManager.setToken('old-token', 10)
+      tokenManager.setToken('old-token', 3600)
+      vi.advanceTimersByTime(3600 * 1000 + 1000) // Fully expired
 
       vi.mocked(authApi.refreshToken).mockImplementationOnce(async () => {
         await new Promise((r) => setTimeout(r, 100))
@@ -206,7 +223,8 @@ describe('TokenManager', () => {
     })
 
     it('allows subsequent refresh after coalesced refresh completes', async () => {
-      tokenManager.setToken('old-token', 10)
+      tokenManager.setToken('old-token', 3600)
+      vi.advanceTimersByTime(3600 * 1000 + 1000) // Fully expired
 
       vi.mocked(authApi.refreshToken)
         .mockResolvedValueOnce({
@@ -223,8 +241,8 @@ describe('TokenManager', () => {
       const token1 = await tokenManager.getToken()
       expect(token1).toBe('token-1')
 
-      // Advance time so new token needs refresh
-      vi.advanceTimersByTime(1000)
+      // Advance time so new token is fully expired
+      vi.advanceTimersByTime(16_000)
 
       const token2 = await tokenManager.getToken()
       expect(token2).toBe('token-2')
@@ -244,33 +262,27 @@ describe('TokenManager', () => {
     })
   })
 
-  describe('clearCache', () => {
-    it('clears the cached token', async () => {
+  describe('onAuthFailure', () => {
+    it('after setToken + onAuthFailure, getToken attempts refresh instead of returning cached', async () => {
       tokenManager.setToken('valid-token', 3600)
 
-      expect(tokenManager.hasToken()).toBe(true)
+      tokenManager.onAuthFailure()
 
-      tokenManager.clearCache()
+      vi.mocked(authApi.refreshToken).mockResolvedValueOnce({
+        accessToken: 'refreshed-token',
+        tokenType: 'Bearer',
+        expiresIn: 3600,
+      })
 
-      expect(tokenManager.hasToken()).toBe(false)
+      const token = await tokenManager.getToken()
+      expect(token).toBe('refreshed-token')
+      expect(authApi.refreshToken).toHaveBeenCalledTimes(1)
+    })
+
+    it('without prior setToken, onAuthFailure + getToken still throws bootstrap error', async () => {
+      tokenManager.onAuthFailure()
       await expect(tokenManager.getToken()).rejects.toThrow(AuthError)
-    })
-  })
-
-  describe('hasToken', () => {
-    it('returns false when no token is set', () => {
-      expect(tokenManager.hasToken()).toBe(false)
-    })
-
-    it('returns true when token is set', () => {
-      tokenManager.setToken('token', 3600)
-      expect(tokenManager.hasToken()).toBe(true)
-    })
-
-    it('returns false after clearCache', () => {
-      tokenManager.setToken('token', 3600)
-      tokenManager.clearCache()
-      expect(tokenManager.hasToken()).toBe(false)
+      await expect(tokenManager.getToken()).rejects.toThrow('Call bootstrap() first')
     })
   })
 
@@ -294,6 +306,60 @@ describe('TokenManager', () => {
   })
 })
 
+describe('TokenManager - refresh timeout', () => {
+  let authApi: ReturnType<typeof createMockAuthApi>
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    authApi = createMockAuthApi()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
+  it('bounds refresh to refreshTimeoutMs when token is fully expired', async () => {
+    const tokenManager = new TokenManager({
+      authApi,
+      refreshTimeoutMs: 500,
+      retryAttempts: 3,
+      retryBaseDelayMs: 100,
+      retryMaxDelayMs: 2000,
+    })
+
+    tokenManager.setToken('old-token', 3600)
+    vi.advanceTimersByTime(3600 * 1000 + 1000) // Fully expired
+
+    // Each refresh call hangs until the signal is aborted
+    vi.mocked(authApi.refreshToken).mockImplementation(
+      ({ signal }: { signal?: AbortSignal } = {}) =>
+        new Promise((_resolve, reject) => {
+          const onAbort = () => reject(new Error('aborted'))
+          if (signal?.aborted) return reject(new Error('aborted'))
+          signal?.addEventListener('abort', onAbort, { once: true })
+        }),
+    )
+
+    let caughtError: Error | undefined
+    const tokenPromise = tokenManager.getToken().catch((err) => {
+      caughtError = err
+    })
+
+    // Advance past the 500ms refresh timeout
+    await vi.advanceTimersByTimeAsync(600)
+    await tokenPromise
+
+    expect(caughtError).toBeInstanceOf(AbortOperationError)
+  })
+
+  it('uses default refreshTimeoutMs of 5000ms', () => {
+    const tokenManager = new TokenManager({ authApi })
+    // Access the private field via bracket notation for testing
+    expect((tokenManager as unknown as { refreshTimeoutMs: number }).refreshTimeoutMs).toBe(5000)
+  })
+})
+
 describe('TokenManager - custom configuration', () => {
   it('respects custom refresh buffer', async () => {
     const authApi = createMockAuthApi()
@@ -302,7 +368,7 @@ describe('TokenManager - custom configuration', () => {
       refreshBufferMs: 60_000, // 60 second buffer
     })
 
-    // Token expires in 50 seconds - within 60s buffer
+    // Token expires in 50 seconds - within 60s buffer but not fully expired
     tokenManager.setToken('old-token', 50)
 
     vi.mocked(authApi.refreshToken).mockResolvedValueOnce({
@@ -311,8 +377,10 @@ describe('TokenManager - custom configuration', () => {
       expiresIn: 3600,
     })
 
+    // Non-blocking: returns old token immediately, triggers background refresh
     const token = await tokenManager.getToken()
-    expect(token).toBe('new-token')
+    expect(token).toBe('old-token')
+    // Background refresh was triggered
     expect(authApi.refreshToken).toHaveBeenCalledTimes(1)
   })
 

@@ -1,12 +1,19 @@
 import { AbortOperationError, APIError, AuthError } from './errors.ts'
+import { calculateBackoff, sleep } from './retry.ts'
 import { USER_AGENT } from './sdk-info.ts'
 import type {
   TAPIResponse,
+  TAuthProvider,
   THttpMethod,
   TRequestOptions,
   TRetryPolicy,
-  TTokenProvider,
 } from './types.ts'
+import {
+  createTimeoutSignal,
+  extractResponseErrorDetail,
+  normalizeBaseUrl,
+  resolveFetch,
+} from './utils.ts'
 
 const DEFAULT_RETRY_POLICY: TRetryPolicy = {
   attempts: 3,
@@ -15,67 +22,29 @@ const DEFAULT_RETRY_POLICY: TRetryPolicy = {
 }
 const DEFAULT_TIMEOUT_IN_MILLISECONDS = 1500
 
-function sleep(milliseconds: number, abortSignal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timeoutId = setTimeout(resolve, milliseconds)
-    if (abortSignal) {
-      const onAbort = () => {
-        clearTimeout(timeoutId)
-        reject(new AbortOperationError())
-      }
-      if (abortSignal.aborted) onAbort()
-      abortSignal.addEventListener('abort', onAbort, { once: true })
-    }
-  })
-}
-
-function calculateBackoffDelay(
-  currentAttemptIndex: number,
-  baseDelayInMilliseconds: number,
-  maximumDelayInMilliseconds: number,
-): number {
-  const exponential: number = Math.min(
-    maximumDelayInMilliseconds,
-    baseDelayInMilliseconds * Math.pow(2, currentAttemptIndex),
-  )
-  const jitter: number = Math.random() * 0.25 * exponential
-  return exponential + jitter
-}
-
-function combineAbortSignals(primary: AbortSignal, secondary?: AbortSignal): AbortSignal {
-  if (!secondary) return primary
-  const controller: AbortController = new AbortController()
-  const propagate = () => controller.abort()
-  if (primary.aborted || secondary.aborted) controller.abort()
-  primary.addEventListener('abort', propagate)
-  secondary.addEventListener('abort', propagate)
-  return controller.signal
-}
-
 export type TTransportOptions = {
   baseUrl: string
-  tokenProvider: TTokenProvider
+  authProvider: TAuthProvider
   retryPolicy?: TRetryPolicy
   fetchImplementation?: typeof fetch | undefined
 }
 
 export class Transport {
   private baseUrl: string
-  private tokenProvider: TTokenProvider
+  private authProvider: TAuthProvider
   private retryPolicy: TRetryPolicy
   private userAgent: string = USER_AGENT
   private fetchImplementation?: typeof fetch
 
   constructor(options: TTransportOptions) {
-    this.baseUrl = options.baseUrl.replace(/\/$/, '')
-    this.tokenProvider = options.tokenProvider
+    this.baseUrl = normalizeBaseUrl(options.baseUrl)
+    this.authProvider = options.authProvider
     this.retryPolicy = options.retryPolicy ?? DEFAULT_RETRY_POLICY
-    this.fetchImplementation =
-      options.fetchImplementation ?? (globalThis as unknown as { fetch?: typeof fetch }).fetch
+    this.fetchImplementation = resolveFetch(options.fetchImplementation)
   }
 
   setBaseUrl(baseUrl: string): void {
-    this.baseUrl = baseUrl.replace(/\/$/, '')
+    this.baseUrl = normalizeBaseUrl(baseUrl)
   }
 
   async request<TResponse>(
@@ -93,103 +62,90 @@ export class Transport {
 
     const timeoutInMilliseconds: number =
       requestOptions.timeoutInMilliseconds ?? DEFAULT_TIMEOUT_IN_MILLISECONDS
-    const timeoutController: AbortController = new AbortController()
-    const timeoutId: NodeJS.Timeout = setTimeout(
-      () => timeoutController.abort(),
-      timeoutInMilliseconds,
-    )
-    const combinedSignal: AbortSignal = requestOptions.signal
-      ? combineAbortSignals(timeoutController.signal, requestOptions.signal)
-      : timeoutController.signal
+    const retryPolicy = requestOptions.retryPolicy ?? this.retryPolicy
 
     if (!this.fetchImplementation)
       throw new APIError('No fetch implementation available in this runtime')
 
-    try {
-      let lastError: unknown
-      let hasRetriedAuth = false
-      for (let attemptIndex = 0; attemptIndex < this.retryPolicy.attempts; attemptIndex++) {
-        try {
-          const bearerToken: string = await this.tokenProvider.getToken(combinedSignal)
-          const httpResponse: Response = await this.fetchImplementation(urlObject, {
-            method: httpMethod,
-            headers: {
-              authorization: `Bearer ${bearerToken}`,
-              'user-agent': this.userAgent,
-              ...(requestOptions.body ? { 'content-type': 'application/json' } : {}),
-              ...(requestOptions.headers ?? {}),
-            },
-            body: requestOptions.body ? JSON.stringify(requestOptions.body) : undefined,
-            signal: combinedSignal,
-          } as RequestInit)
+    let lastError: unknown
+    let hasRetriedAuth = false
 
-          if (httpResponse.status === 401 || httpResponse.status === 403) {
-            if (!hasRetriedAuth) {
-              hasRetriedAuth = true
-              this.tokenProvider.clearCache?.()
-              continue
-            }
-            throw new AuthError(`Authentication failed with status ${httpResponse.status}`)
+    for (let attemptIndex = 0; attemptIndex < retryPolicy.attempts; attemptIndex++) {
+      if (requestOptions.signal?.aborted) {
+        throw lastError ?? new AbortOperationError()
+      }
+
+      const { signal: attemptSignal, cleanup } = createTimeoutSignal(
+        timeoutInMilliseconds,
+        requestOptions.signal,
+      )
+
+      try {
+        const authHeaders = await this.authProvider.getAuthHeaders(attemptSignal)
+        const httpResponse: Response = await this.fetchImplementation(urlObject, {
+          method: httpMethod,
+          headers: {
+            'user-agent': this.userAgent,
+            ...(requestOptions.body ? { 'content-type': 'application/json' } : {}),
+            ...authHeaders,
+            ...(requestOptions.headers ?? {}),
+          },
+          body: requestOptions.body ? JSON.stringify(requestOptions.body) : undefined,
+          signal: attemptSignal,
+        } as RequestInit)
+
+        if (httpResponse.status === 401 || httpResponse.status === 403) {
+          if (!hasRetriedAuth && this.authProvider.onAuthFailure) {
+            hasRetriedAuth = true
+            this.authProvider.onAuthFailure()
+            continue
           }
+          throw new AuthError(`Authentication failed with status ${httpResponse.status}`)
+        }
 
-          if (!httpResponse.ok) {
-            if (
-              httpResponse.status >= 500 &&
-              httpResponse.status <= 599 &&
-              attemptIndex < this.retryPolicy.attempts - 1
-            ) {
-              await sleep(
-                calculateBackoffDelay(
-                  attemptIndex,
-                  this.retryPolicy.baseDelayInMilliseconds,
-                  this.retryPolicy.maximumDelayInMilliseconds,
-                ),
-                combinedSignal,
-              )
-              continue
-            }
-            let errorDetail = ''
-            try {
-              const body: unknown = await httpResponse.json()
-              if (
-                typeof body === 'object' &&
-                body !== null &&
-                'message' in body &&
-                typeof body.message === 'string'
-              ) {
-                errorDetail = `: ${body.message}`
-              }
-            } catch {
-              // JSON parse failed
-            }
-            throw new APIError(
-              `HTTP ${httpResponse.status} for ${httpMethod} ${path}${errorDetail}`,
-            )
-          }
-
-          if (httpResponse.status === 204) return undefined as unknown as TResponse
-          const parsedJson = (await httpResponse.json()) as TAPIResponse<TResponse>
-          return parsedJson.data
-        } catch (caughtError) {
-          lastError = caughtError
-          if (caughtError instanceof APIError || caughtError instanceof AuthError) throw caughtError
-          if (attemptIndex < this.retryPolicy.attempts - 1) {
+        if (!httpResponse.ok) {
+          if (
+            httpResponse.status >= 500 &&
+            httpResponse.status <= 599 &&
+            attemptIndex < retryPolicy.attempts - 1
+          ) {
             await sleep(
-              calculateBackoffDelay(
+              calculateBackoff(
                 attemptIndex,
-                this.retryPolicy.baseDelayInMilliseconds,
-                this.retryPolicy.maximumDelayInMilliseconds,
+                retryPolicy.baseDelayInMilliseconds,
+                retryPolicy.maximumDelayInMilliseconds,
               ),
-              combinedSignal,
+              requestOptions.signal,
             )
             continue
           }
-          throw caughtError
+          const errorDetail = await extractResponseErrorDetail(httpResponse)
+          throw new APIError(`HTTP ${httpResponse.status} for ${httpMethod} ${path}${errorDetail}`)
         }
+
+        if (httpResponse.status === 204) return undefined as unknown as TResponse
+        const parsedJson = (await httpResponse.json()) as TAPIResponse<TResponse>
+        return parsedJson.data
+      } catch (caughtError) {
+        lastError = caughtError
+        if (caughtError instanceof APIError || caughtError instanceof AuthError) throw caughtError
+        if (requestOptions.signal?.aborted) throw caughtError
+        if (attemptIndex < retryPolicy.attempts - 1) {
+          await sleep(
+            calculateBackoff(
+              attemptIndex,
+              retryPolicy.baseDelayInMilliseconds,
+              retryPolicy.maximumDelayInMilliseconds,
+            ),
+            requestOptions.signal,
+          )
+          continue
+        }
+        throw caughtError
+      } finally {
+        cleanup()
       }
-      throw lastError
-    } finally {
-      clearTimeout(timeoutId)
     }
+    throw lastError
   }
 }
