@@ -11,6 +11,6 @@ export default defineConfig({
   sourcemap: false,
   minify: false,
   platform: 'node',
-  target: 'node22',
+  target: 'node18',
   skipNodeModulesBundle: true,
 })
