@@ -3,7 +3,9 @@
 [![npm version](https://img.shields.io/npm/v/@openfuseio/sdk.svg)](https://www.npmjs.com/package/@openfuseio/sdk)
 [![License](https://img.shields.io/badge/License-Elastic%202.0-blue.svg)](https://www.elastic.co/licensing/elastic-license)
 
-Node.js client for the Openfuse circuit breaker service. Zero runtime dependencies.
+Node.js client for the [Openfuse](https://openfuse.io) circuit breaker service. Zero runtime dependencies.
+
+> **[Read the full documentation](https://www.openfuse.io/docs)**
 
 ## Installation
 
@@ -11,81 +13,49 @@ Node.js client for the Openfuse circuit breaker service. Zero runtime dependenci
 npm install @openfuseio/sdk
 ```
 
-## Requirements
+**Requirements:** Node.js >= 18.3 and an [Openfuse account](https://openfuse.io) with an SDK client configured.
 
-- Node.js >= 22.0.0
-- [Openfuse account](https://openfuse.io) with an SDK client configured
-
-## Usage
+## Quick start
 
 ```ts
 import { OpenfuseCloud } from '@openfuseio/sdk'
 
-const client = new OpenfuseCloud({
-  system: 'checkout',
-  clientId: 'your-client-id',
-  clientSecret: 'your-client-secret',
+const openfuse = new OpenfuseCloud({
+  system: 'payments',
+  clientId: 'YOUR_CLIENT_ID',
+  clientSecret: 'YOUR_CLIENT_SECRET',
 })
 
-client.init()
+openfuse.init()
 
-const recommendations = await client
-  .breaker('recommendations')
-  .protect(() => fetchRecommendations(userId), { fallback: () => [] })
+const customer = await openfuse
+  .breaker('stripe-get-customer')
+  .protect(() => stripe.customers.retrieve(customerId), { fallback: () => cachedCustomer })
 ```
 
-If `recommendations` breaker is open, `fallback` returns an empty array immediately, no network call attempted.
+If the `stripe-get-customer` breaker is open, `fallback` returns immediately — no network call attempted.
 
-## Breaker States
+## Documentation
 
-- **Closed** — Requests flow through normally
-- **Open** — Requests blocked, fallback triggered
-- **Half-Open** — Probe requests allowed to test recovery
+- **[Quickstart](https://www.openfuse.io/docs/quickstart)** — Zero to a protected call in under 2 minutes
+- **[Protecting calls](https://www.openfuse.io/docs/guides/protecting-calls)** — Timeouts, fallbacks, and cancellation
+- **[Error handling](https://www.openfuse.io/docs/guides/error-handling)** — Which methods throw and how to handle them
+- **[Configuration](https://www.openfuse.io/docs/guides/configuration)** — All client options for cloud and self-hosted
+- **[API reference](https://www.openfuse.io/docs/reference/client)** — Full API reference
 
-## API Reference
-
-### Lifecycle
-
-| Method    | Description                                           |
-| --------- | ----------------------------------------------------- |
-| `init()`  | Fetch breaker configuration. Call once at startup.    |
-| `ready()` | Resolves when init completes. Optional.               |
-| `close()` | Flush metrics and clean up. Call before process exit. |
-| `reset()` | Clear cached state and flush metrics.                 |
-
-### Breaker Handle
-
-| Method                            | Description                               |
-| --------------------------------- | ----------------------------------------- |
-| `breaker(slug).protect(fn, opts)` | Execute function with breaker protection. |
-| `breaker(slug).isOpen()`          | Returns `true` if breaker is open.        |
-| `breaker(slug).isClosed()`        | Returns `true` if breaker is closed.      |
-| `breaker(slug).status(signal?)`   | Returns full breaker details.             |
-| `breakers()`                      | Returns all breakers for the system.      |
-
-### protect Options
-
-```ts
-await client.breaker('my-breaker').protect(() => doSomething(), {
-  fallback: () => fallbackValue, // Called when breaker is open
-  timeout: 5000, // Timeout in ms for the wrapped function
-  signal: abortController.signal, // AbortSignal for cancellation
-})
-```
-
-## Self-Hosted
+## Self-hosted
 
 ```ts
 import { Openfuse } from '@openfuseio/sdk'
 
-const client = new Openfuse({
-  baseUrl: 'https://openfuse.internal.mycompany.com',
-  system: 'checkout',
-  clientId: 'your-client-id',
-  clientSecret: 'your-client-secret',
+const openfuse = new Openfuse({
+  baseUrl: 'https://openfuse.your-domain.com',
+  system: 'payments',
+  clientId: 'YOUR_CLIENT_ID',
+  clientSecret: 'YOUR_CLIENT_SECRET',
 })
 
-client.init()
+openfuse.init()
 ```
 
 ## License
