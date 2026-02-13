@@ -15,7 +15,10 @@ export class TTLCache<K, V> {
   get(cacheKey: K): V | undefined {
     const entry: TCacheEntry<V> | undefined = this.internalStore.get(cacheKey)
     if (!entry) return undefined
-    if (Date.now() >= entry.expiresAtEpochMilliseconds) return undefined
+    if (Date.now() >= entry.expiresAtEpochMilliseconds) {
+      this.internalStore.delete(cacheKey)
+      return undefined
+    }
     this.internalStore.delete(cacheKey)
     this.internalStore.set(cacheKey, entry)
     return entry.value

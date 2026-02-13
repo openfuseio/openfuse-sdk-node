@@ -1,5 +1,6 @@
-import { APIError, AuthError } from '../../core/errors.ts'
-import { SDK_NAME, SDK_VERSION, USER_AGENT } from '../../core/sdk-info.ts'
+import { SDK_NAME, SDK_VERSION } from '../../core/sdk-info.ts'
+import { Transport } from '../../core/transport.ts'
+import { normalizeBaseUrl, resolveFetch } from '../../core/utils.ts'
 import type {
   TSdkBootstrapRequest,
   TSdkBootstrapResponse,
@@ -23,6 +24,7 @@ export type TBootstrapOptions = {
   instanceId?: string
   signal?: AbortSignal
   timeoutMs?: number
+  maxAttempts?: number
 }
 
 export type TRefreshTokenOptions = {
@@ -30,83 +32,59 @@ export type TRefreshTokenOptions = {
   timeoutMs?: number
 }
 
+const BOOTSTRAP_RETRY_ATTEMPTS = 3
+const BOOTSTRAP_RETRY_BASE_DELAY_MS = 200
+const BOOTSTRAP_RETRY_MAX_DELAY_MS = 2000
+
 /**
  * Low-level API client for authentication endpoints.
- * Handles POST /sdk/bootstrap and POST /sdk/token/refresh.
+ * Handles POST /sdk/auth/bootstrap and GET /sdk/auth/token.
+ * Uses Transport internally with Basic Auth (no token rotation on 401).
  */
 export class AuthApi {
-  private readonly baseUrl: string
-  private readonly clientId: string
-  private readonly clientSecret: string
-  private readonly fetchImpl: typeof fetch
+  private readonly transport: Transport
 
   constructor(options: TAuthApiOptions) {
-    this.baseUrl = options.baseUrl.replace(/\/$/, '')
-    this.clientId = options.clientId
-    this.clientSecret = options.clientSecret
-    this.fetchImpl =
-      options.fetchImplementation ?? (globalThis as unknown as { fetch?: typeof fetch }).fetch!
+    const basicAuth = Buffer.from(`${options.clientId}:${options.clientSecret}`).toString('base64')
+
+    this.transport = new Transport({
+      baseUrl: normalizeBaseUrl(options.baseUrl),
+      authProvider: {
+        getAuthHeaders: async () => ({ authorization: `Basic ${basicAuth}` }),
+      },
+      fetchImplementation: resolveFetch(options.fetchImplementation),
+    })
   }
 
   /**
    * Calls POST /v1/sdk/auth/bootstrap with Basic Auth.
    * Returns system config, breakers, metrics config, and an access token.
+   * Retries on 5xx and network errors with exponential backoff.
    */
   async bootstrap(systemSlug: string, options?: TBootstrapOptions): Promise<TSdkBootstrapResponse> {
-    const url = `${this.baseUrl}/v1/sdk/auth/bootstrap`
-    const timeoutMs = options?.timeoutMs ?? 10_000
-
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
-
-    const combinedSignal = options?.signal
-      ? this.combineSignals(controller.signal, options.signal)
-      : controller.signal
-
-    try {
-      const basicAuth = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64')
-
-      const clientMeta: TSdkClientMeta = {
-        sdkName: SDK_NAME,
-        sdkVersion: SDK_VERSION,
-        runtime: 'node',
-        runtimeVersion: process.version,
-        platform: process.platform,
-        arch: process.arch,
-        instanceId: options?.instanceId,
-        ...options?.clientMeta,
-      }
-
-      const body: TSdkBootstrapRequest = {
-        systemSlug,
-        clientMeta,
-      }
-
-      const response = await this.fetchImpl(url, {
-        method: 'POST',
-        headers: {
-          Authorization: `Basic ${basicAuth}`,
-          'Content-Type': 'application/json',
-          'User-Agent': USER_AGENT,
-        },
-        body: JSON.stringify(body),
-        signal: combinedSignal,
-      } as RequestInit)
-
-      if (response.status === 401 || response.status === 403) {
-        throw new AuthError(`Authentication failed: invalid client credentials`)
-      }
-
-      if (!response.ok) {
-        const errorDetail = await this.extractErrorDetail(response)
-        throw new APIError(`Bootstrap failed with HTTP ${response.status}${errorDetail}`)
-      }
-
-      const result = (await response.json()) as { data: TSdkBootstrapResponse }
-      return result.data
-    } finally {
-      clearTimeout(timeoutId)
+    const clientMeta: TSdkClientMeta = {
+      sdkName: SDK_NAME,
+      sdkVersion: SDK_VERSION,
+      runtime: 'node',
+      runtimeVersion: process.version,
+      platform: process.platform,
+      arch: process.arch,
+      instanceId: options?.instanceId,
+      ...options?.clientMeta,
     }
+
+    const body: TSdkBootstrapRequest = { systemSlug, clientMeta }
+
+    return this.transport.request<TSdkBootstrapResponse>('POST', '/v1/sdk/auth/bootstrap', {
+      body,
+      signal: options?.signal,
+      timeoutInMilliseconds: options?.timeoutMs ?? 5_000,
+      retryPolicy: {
+        attempts: options?.maxAttempts ?? BOOTSTRAP_RETRY_ATTEMPTS,
+        baseDelayInMilliseconds: BOOTSTRAP_RETRY_BASE_DELAY_MS,
+        maximumDelayInMilliseconds: BOOTSTRAP_RETRY_MAX_DELAY_MS,
+      },
+    })
   }
 
   /**
@@ -114,67 +92,10 @@ export class AuthApi {
    * Returns a fresh access token.
    */
   async refreshToken(options?: TRefreshTokenOptions): Promise<TSdkTokenRefreshResponse> {
-    const url = `${this.baseUrl}/v1/sdk/auth/token`
-    const timeoutMs = options?.timeoutMs ?? 10_000
-
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
-
-    const combinedSignal = options?.signal
-      ? this.combineSignals(controller.signal, options.signal)
-      : controller.signal
-
-    try {
-      const basicAuth = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64')
-
-      const response = await this.fetchImpl(url, {
-        method: 'GET',
-        headers: {
-          Authorization: `Basic ${basicAuth}`,
-          'User-Agent': USER_AGENT,
-        },
-        signal: combinedSignal,
-      } as RequestInit)
-
-      if (response.status === 401 || response.status === 403) {
-        throw new AuthError(`Authentication failed: invalid client credentials`)
-      }
-
-      if (!response.ok) {
-        const errorDetail = await this.extractErrorDetail(response)
-        throw new APIError(`Token refresh failed with HTTP ${response.status}${errorDetail}`)
-      }
-
-      const result = (await response.json()) as { data: TSdkTokenRefreshResponse }
-      return result.data
-    } finally {
-      clearTimeout(timeoutId)
-    }
-  }
-
-  private async extractErrorDetail(response: Response): Promise<string> {
-    try {
-      const errorBody = (await response.json()) as { message?: string }
-      if (errorBody.message) {
-        return `: ${errorBody.message}`
-      }
-    } catch {
-      // JSON parse failed
-    }
-    return ''
-  }
-
-  private combineSignals(primary: AbortSignal, secondary: AbortSignal): AbortSignal {
-    const controller = new AbortController()
-    const abort = () => controller.abort()
-
-    if (primary.aborted || secondary.aborted) {
-      controller.abort()
-    }
-
-    primary.addEventListener('abort', abort, { once: true })
-    secondary.addEventListener('abort', abort, { once: true })
-
-    return controller.signal
+    return this.transport.request<TSdkTokenRefreshResponse>('GET', '/v1/sdk/auth/token', {
+      signal: options?.signal,
+      timeoutInMilliseconds: options?.timeoutMs ?? 10_000,
+      retryPolicy: { attempts: 1, baseDelayInMilliseconds: 0, maximumDelayInMilliseconds: 0 },
+    })
   }
 }

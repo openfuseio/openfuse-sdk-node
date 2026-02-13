@@ -43,11 +43,11 @@ export function createMockAuthApi() {
 }
 
 /**
- * Creates a mock token provider for testing Transport.
+ * Creates a mock auth provider for testing Transport.
  */
-export function createMockTokenProvider(token = 'test-token') {
+export function createMockAuthProvider(token = 'test-token') {
   return {
-    getToken: vi.fn().mockResolvedValue(token),
-    clearCache: vi.fn(),
+    getAuthHeaders: vi.fn().mockResolvedValue({ authorization: `Bearer ${token}` }),
+    onAuthFailure: vi.fn(),
   }
 }

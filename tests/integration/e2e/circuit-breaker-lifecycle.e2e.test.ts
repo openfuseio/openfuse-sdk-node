@@ -15,7 +15,6 @@ import {
   type TTestBreaker,
   type TTestTripPolicyRule,
 } from './setup.ts'
-import { CircuitOpenError } from '../../../src/core/errors.ts'
 
 const TIMING = {
   TRIP_WAIT_MS: 35_000,
@@ -147,8 +146,8 @@ async function waitForTrip(
   const startTime = Date.now()
 
   while (Date.now() - startTime < TIMING.TRIP_WAIT_MS) {
-    client.invalidate()
-    const isOpen = await client.isOpen(breakerSlug)
+    client.reset()
+    const isOpen = await client.breaker(breakerSlug).isOpen()
     if (isOpen) {
       console.log(`Breaker tripped after ${(Date.now() - startTime) / 1000}s`)
       return true
@@ -166,7 +165,7 @@ async function triggerFailures(
 ): Promise<void> {
   for (let i = 0; i < count; i++) {
     await expect(
-      client.withBreaker(breakerSlug, async () => {
+      client.breaker(breakerSlug).protect(async () => {
         throw new Error('Simulated failure')
       }),
     ).rejects.toThrow('Simulated failure')
@@ -190,12 +189,13 @@ describe.skipIf(!canRunTests('failure-rate'))('E2E: Circuit Breaker Lifecycle', 
     'should trip breaker when failure rate exceeds threshold',
     async () => {
       const client = createSDKClient(system.slug)
-      await client.bootstrap()
+      client.init()
+      await client.ready()
 
       try {
-        expect(await client.isOpen(breaker.slug)).toBe(false)
+        expect(await client.breaker(breaker.slug).isOpen()).toBe(false)
 
-        await client.withBreaker(breaker.slug, async () => 'success')
+        await client.breaker(breaker.slug).protect(async () => 'success')
         await triggerFailures(client, breaker.slug, 4)
 
         await sleep(6_000)
@@ -204,11 +204,11 @@ describe.skipIf(!canRunTests('failure-rate'))('E2E: Circuit Breaker Lifecycle', 
         const tripped = await waitForTrip(client, breaker.slug)
         expect(tripped).toBe(true)
 
-        await expect(
-          client.withBreaker(breaker.slug, async () => 'should not execute'),
-        ).rejects.toThrow(CircuitOpenError)
+        // With fail-open and no fallback, fn executes anyway
+        const result = await client.breaker(breaker.slug).protect(async () => 'executed-anyway')
+        expect(result).toBe('executed-anyway')
       } finally {
-        await client.shutdown()
+        await client.close()
       }
     },
     TIMING.TEST_TIMEOUT_MS,
@@ -218,16 +218,17 @@ describe.skipIf(!canRunTests('failure-rate'))('E2E: Circuit Breaker Lifecycle', 
     'should transition to half-open after probe interval',
     async () => {
       const client = createSDKClient(system.slug)
-      await client.bootstrap()
+      client.init()
+      await client.ready()
 
       try {
-        client.invalidate()
-        let isOpen = await client.isOpen(breaker.slug)
+        client.reset()
+        let isOpen = await client.breaker(breaker.slug).isOpen()
 
         if (!isOpen) {
           await apiClient.updateBreakerState(system.id, breaker.id, 'open', 'E2E test setup')
-          client.invalidate()
-          isOpen = await client.isOpen(breaker.slug)
+          client.reset()
+          isOpen = await client.breaker(breaker.slug).isOpen()
           expect(isOpen).toBe(true)
         }
 
@@ -255,12 +256,12 @@ describe.skipIf(!canRunTests('failure-rate'))('E2E: Circuit Breaker Lifecycle', 
         console.log(`Half-open transition ${transitioned ? 'succeeded' : 'timed out'}`)
 
         if (transitioned) {
-          client.invalidate()
-          const result = await client.withBreaker(breaker.slug, async () => 'probe-success')
+          client.reset()
+          const result = await client.breaker(breaker.slug).protect(async () => 'probe-success')
           expect(result).toBe('probe-success')
         }
       } finally {
-        await client.shutdown()
+        await client.close()
       }
     },
     TIMING.TEST_TIMEOUT_MS,
@@ -270,19 +271,20 @@ describe.skipIf(!canRunTests('failure-rate'))('E2E: Circuit Breaker Lifecycle', 
     'should close breaker after successful probe in half-open state',
     async () => {
       const client = createSDKClient(system.slug)
-      await client.bootstrap()
+      client.init()
+      await client.ready()
 
       try {
         await apiClient.updateBreakerState(system.id, breaker.id, 'closed', 'E2E test reset')
-        client.invalidate()
+        client.reset()
 
-        expect(await client.isClosed(breaker.slug)).toBe(true)
+        expect(await client.breaker(breaker.slug).isClosed()).toBe(true)
 
-        const result = await client.withBreaker(breaker.slug, async () => 'success after reset')
+        const result = await client.breaker(breaker.slug).protect(async () => 'success after reset')
         expect(result).toBe('success after reset')
-        expect(await client.isClosed(breaker.slug)).toBe(true)
+        expect(await client.breaker(breaker.slug).isClosed()).toBe(true)
       } finally {
-        await client.shutdown()
+        await client.close()
       }
     },
     TIMING.TEST_TIMEOUT_MS,
@@ -304,7 +306,8 @@ describe.skipIf(!canRunTests('failure-rate'))('E2E: Circuit Breaker - onOpen fal
     'should call onOpen fallback when breaker trips',
     async () => {
       const client = createSDKClient(system.slug)
-      await client.bootstrap()
+      client.init()
+      await client.ready()
 
       try {
         await triggerFailures(client, breaker.slug, 5)
@@ -314,24 +317,26 @@ describe.skipIf(!canRunTests('failure-rate'))('E2E: Circuit Breaker - onOpen fal
 
         await waitFor(
           async () => {
-            client.invalidate()
-            return client.isOpen(breaker.slug)
+            client.reset()
+            return client.breaker(breaker.slug).isOpen()
           },
           { timeout: TIMING.TRIP_WAIT_MS, interval: TIMING.POLL_INTERVAL_MS },
         )
 
         let fallbackCalled = false
-        const result = await client.withBreaker(breaker.slug, async () => 'should not execute', {
-          onOpen: () => {
-            fallbackCalled = true
-            return 'fallback-result'
-          },
-        })
+        const result = await client
+          .breaker(breaker.slug)
+          .protect(async () => 'should not execute', {
+            fallback: () => {
+              fallbackCalled = true
+              return 'fallback-result'
+            },
+          })
 
         expect(fallbackCalled).toBe(true)
         expect(result).toBe('fallback-result')
       } finally {
-        await client.shutdown()
+        await client.close()
       }
     },
     TIMING.TEST_TIMEOUT_MS,
@@ -353,13 +358,14 @@ describe.skipIf(!canRunTests('latency-p95'))('E2E: Circuit Breaker - Latency p95
     'should trip breaker when latency p95 exceeds threshold',
     async () => {
       const client = createSDKClient(system.slug)
-      await client.bootstrap()
+      client.init()
+      await client.ready()
 
       try {
-        expect(await client.withBreaker(breaker.slug, async () => 'fast')).toBe('fast')
+        expect(await client.breaker(breaker.slug).protect(async () => 'fast')).toBe('fast')
 
         for (let i = 0; i < 5; i++) {
-          await client.withBreaker(breaker.slug, async () => {
+          await client.breaker(breaker.slug).protect(async () => {
             await sleep(200)
             return 'slow'
           })
@@ -372,10 +378,10 @@ describe.skipIf(!canRunTests('latency-p95'))('E2E: Circuit Breaker - Latency p95
         const startTime = Date.now()
 
         while (Date.now() - startTime < TIMING.TRIP_WAIT_MS && !tripDetected) {
-          client.invalidate()
+          client.reset()
 
-          const result = await client.withBreaker(breaker.slug, async () => 'work-executed', {
-            onOpen: () => {
+          const result = await client.breaker(breaker.slug).protect(async () => 'work-executed', {
+            fallback: () => {
               tripDetected = true
               return 'breaker-open'
             },
@@ -392,19 +398,18 @@ describe.skipIf(!canRunTests('latency-p95'))('E2E: Circuit Breaker - Latency p95
         expect(tripDetected).toBe(true)
 
         let workExecuted = false
-        const finalResult = await client.withBreaker(
-          breaker.slug,
+        const finalResult = await client.breaker(breaker.slug).protect(
           async () => {
             workExecuted = true
             return 'should-not-run'
           },
-          { onOpen: () => 'blocked' },
+          { fallback: () => 'blocked' },
         )
 
         expect(workExecuted).toBe(false)
         expect(finalResult).toBe('blocked')
       } finally {
-        await client.shutdown()
+        await client.close()
       }
     },
     TIMING.TEST_TIMEOUT_MS,
@@ -428,16 +433,17 @@ describe.skipIf(!canRunTests('failure-rate'))(
       'should block calls after failures trip the breaker',
       async () => {
         const client = createSDKClient(system.slug)
-        await client.bootstrap()
+        client.init()
+        await client.ready()
 
         try {
-          expect(await client.withBreaker(breaker.slug, async () => 'initial-success')).toBe(
+          expect(await client.breaker(breaker.slug).protect(async () => 'initial-success')).toBe(
             'initial-success',
           )
 
           for (let i = 0; i < 5; i++) {
             try {
-              await client.withBreaker(breaker.slug, async () => {
+              await client.breaker(breaker.slug).protect(async () => {
                 throw new Error('simulated-failure')
               })
             } catch {
@@ -452,10 +458,10 @@ describe.skipIf(!canRunTests('failure-rate'))(
           const startTime = Date.now()
 
           while (Date.now() - startTime < TIMING.TRIP_WAIT_MS && !tripDetected) {
-            client.invalidate()
+            client.reset()
 
-            const result = await client.withBreaker(breaker.slug, async () => 'work-executed', {
-              onOpen: () => {
+            const result = await client.breaker(breaker.slug).protect(async () => 'work-executed', {
+              fallback: () => {
                 tripDetected = true
                 return 'breaker-open'
               },
@@ -472,19 +478,18 @@ describe.skipIf(!canRunTests('failure-rate'))(
           expect(tripDetected).toBe(true)
 
           let workExecuted = false
-          const finalResult = await client.withBreaker(
-            breaker.slug,
+          const finalResult = await client.breaker(breaker.slug).protect(
             async () => {
               workExecuted = true
               return 'should-not-run'
             },
-            { onOpen: () => 'blocked' },
+            { fallback: () => 'blocked' },
           )
 
           expect(workExecuted).toBe(false)
           expect(finalResult).toBe('blocked')
         } finally {
-          await client.shutdown()
+          await client.close()
         }
       },
       TIMING.TEST_TIMEOUT_MS,

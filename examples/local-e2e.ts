@@ -21,7 +21,7 @@ import { Openfuse, OpenfuseCloud } from '../src/index.ts'
 const isLocal = process.env.OPENFUSE_LOCAL === '1'
 
 const CONFIG = {
-  systemSlug: process.env.OPENFUSE_SYSTEM ?? 'system',
+  system: process.env.OPENFUSE_SYSTEM ?? 'system',
   clientId: process.env.OPENFUSE_CLIENT_ID ?? 'tzxcvw0e-clp0cabe-e2e-test-sdk',
   clientSecret: process.env.OPENFUSE_CLIENT_SECRET ?? '',
   breakerSlug: process.env.OPENFUSE_BREAKER ?? 'stripe-payment-processor',
@@ -39,7 +39,7 @@ function createClient(): Openfuse {
   if (isLocal) {
     return new Openfuse({
       baseUrl: LOCAL_CONFIG.apiBase,
-      systemSlug: CONFIG.systemSlug,
+      system: CONFIG.system,
       clientId: CONFIG.clientId,
       clientSecret: CONFIG.clientSecret,
       metrics: { windowSizeMs: 5_000, flushIntervalMs: 10_000 },
@@ -47,7 +47,7 @@ function createClient(): Openfuse {
   }
 
   return new OpenfuseCloud({
-    systemSlug: CONFIG.systemSlug,
+    system: CONFIG.system,
     clientId: CONFIG.clientId,
     clientSecret: CONFIG.clientSecret,
     metrics: { windowSizeMs: 5_000, flushIntervalMs: 10_000 },
@@ -59,7 +59,7 @@ async function main() {
   console.log('-'.repeat(50))
   console.log(`Mode: ${isLocal ? 'LOCAL' : 'CLOUD'}`)
   if (isLocal) console.log(`API Base: ${LOCAL_CONFIG.apiBase}`)
-  console.log(`System: ${CONFIG.systemSlug}`)
+  console.log(`System: ${CONFIG.system}`)
   console.log(`Breaker: ${CONFIG.breakerSlug}`)
   console.log('-'.repeat(50))
 
@@ -70,29 +70,32 @@ async function main() {
 
   const client = createClient()
 
-  console.log(`\nInstance ID: ${client.getInstanceId()}`)
+  console.log(`\nInstance ID: ${client.instanceId}`)
 
-  console.log('\nBootstrapping...')
-  await client.bootstrap()
-  console.log('Bootstrap complete')
+  console.log('\nInitializing...')
+  client.init()
+  await client.ready()
+  console.log('Init complete')
 
   console.log('\nListing breakers...')
-  const breakers = await client.listBreakers()
-  console.log(`Found ${breakers.length} breaker(s):`)
-  for (const b of breakers) {
+  const allBreakers = await client.breakers()
+  console.log(`Found ${allBreakers.length} breaker(s):`)
+  for (const b of allBreakers) {
     console.log(`  - ${b.slug} (${b.state})`)
   }
 
-  console.log(`\nTesting withBreaker (${CONFIG.breakerSlug}) - SUCCESS case...`)
-  const result1 = await client.withBreaker(CONFIG.breakerSlug, async () => {
+  const handle = client.breaker(CONFIG.breakerSlug)
+
+  console.log(`\nTesting protect (${CONFIG.breakerSlug}) - SUCCESS case...`)
+  const result1 = await handle.protect(async () => {
     await sleep(50)
     return { status: 'ok', data: 'payment processed' }
   })
   console.log(`Result: ${JSON.stringify(result1)}`)
 
-  console.log(`\nTesting withBreaker (${CONFIG.breakerSlug}) - FAILURE case...`)
+  console.log(`\nTesting protect (${CONFIG.breakerSlug}) - FAILURE case...`)
   try {
-    await client.withBreaker(CONFIG.breakerSlug, async () => {
+    await handle.protect(async () => {
       await sleep(30)
       throw new Error('Payment gateway timeout')
     })
@@ -100,10 +103,9 @@ async function main() {
     console.log(`Caught expected error: ${(err as Error).message}`)
   }
 
-  console.log(`\nTesting withBreaker (${CONFIG.breakerSlug}) - TIMEOUT case...`)
+  console.log(`\nTesting protect (${CONFIG.breakerSlug}) - TIMEOUT case...`)
   try {
-    await client.withBreaker(
-      CONFIG.breakerSlug,
+    await handle.protect(
       async () => {
         await sleep(500)
         return 'should not reach here'
@@ -121,7 +123,7 @@ async function main() {
   await client.flushMetrics()
   console.log('Metrics flushed')
 
-  await client.shutdown()
+  await client.close()
   console.log('\nDone!')
 }
 

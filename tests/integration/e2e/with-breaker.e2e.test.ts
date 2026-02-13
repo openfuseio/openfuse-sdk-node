@@ -1,7 +1,7 @@
 /**
- * E2E Tests: withBreaker
+ * E2E Tests: protect
  *
- * Tests SDK withBreaker execution against a live API.
+ * Tests SDK protect execution against a live API.
  *
  * Run with:
  *   E2E_CLIENT_SECRET=secret pnpm test tests/integration/e2e/with-breaker.e2e.test.ts
@@ -9,10 +9,10 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { setupE2ETest, E2E_CONFIG, sleep } from './setup.ts'
-import { CircuitOpenError, TimeoutError } from '../../../src/core/errors.ts'
+import { TimeoutError } from '../../../src/core/errors.ts'
 import type { Openfuse } from '../../../src/index.ts'
 
-describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: withBreaker()', () => {
+describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: protect()', () => {
   // Create 2 breakers: one closed (for execution), one open (for blocking)
   const ctx = setupE2ETest({
     breakerCount: 2,
@@ -23,11 +23,12 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: withBreaker()', () => {
 
   beforeEach(async () => {
     client = ctx.createSDKClient()
-    await client.bootstrap()
+    client.init()
+    await client.ready()
   })
 
   afterEach(async () => {
-    await client.shutdown()
+    await client.close()
   })
 
   describe('when breaker is closed', () => {
@@ -35,7 +36,7 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: withBreaker()', () => {
       const closedBreaker = ctx.breakers.find((b) => b.state === 'closed')
       expect(closedBreaker).toBeDefined()
 
-      const result = await client.withBreaker(closedBreaker!.slug, async () => {
+      const result = await client.breaker(closedBreaker!.slug).protect(async () => {
         return { status: 'ok', data: 'test-result' }
       })
 
@@ -46,7 +47,7 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: withBreaker()', () => {
       const closedBreaker = ctx.breakers.find((b) => b.state === 'closed')
       expect(closedBreaker).toBeDefined()
 
-      const result = await client.withBreaker(closedBreaker!.slug, async () => {
+      const result = await client.breaker(closedBreaker!.slug).protect(async () => {
         await sleep(50)
         return 'async-result'
       })
@@ -61,7 +62,7 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: withBreaker()', () => {
       const testError = new Error('Work function failed')
 
       await expect(
-        client.withBreaker(closedBreaker!.slug, async () => {
+        client.breaker(closedBreaker!.slug).protect(async () => {
           throw testError
         }),
       ).rejects.toThrow('Work function failed')
@@ -73,7 +74,7 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: withBreaker()', () => {
 
       type TResult = { userId: string; name: string }
 
-      const result = await client.withBreaker<TResult>(closedBreaker!.slug, async () => {
+      const result = await client.breaker(closedBreaker!.slug).protect<TResult>(async () => {
         return { userId: '123', name: 'Test User' }
       })
 
@@ -83,31 +84,30 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: withBreaker()', () => {
   })
 
   describe('when breaker is open', () => {
-    it('should throw CircuitOpenError when no onOpen callback', async () => {
+    it('should execute fn (fail-open) when no fallback', async () => {
       const openBreaker = ctx.breakers.find((b) => b.state === 'open')
       expect(openBreaker).toBeDefined()
 
-      await expect(
-        client.withBreaker(openBreaker!.slug, async () => {
-          return 'should not execute'
-        }),
-      ).rejects.toThrow(CircuitOpenError)
+      const result = await client.breaker(openBreaker!.slug).protect(async () => {
+        return 'executed-anyway'
+      })
+
+      expect(result).toBe('executed-anyway')
     })
 
-    it('should call onOpen callback instead of work function', async () => {
+    it('should call fallback instead of work function', async () => {
       const openBreaker = ctx.breakers.find((b) => b.state === 'open')
       expect(openBreaker).toBeDefined()
 
       let workFunctionCalled = false
 
-      const result = await client.withBreaker(
-        openBreaker!.slug,
+      const result = await client.breaker(openBreaker!.slug).protect(
         async () => {
           workFunctionCalled = true
           return 'work-result'
         },
         {
-          onOpen: () => 'fallback-result',
+          fallback: () => 'fallback-result',
         },
       )
 
@@ -115,20 +115,20 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: withBreaker()', () => {
       expect(result).toBe('fallback-result')
     })
 
-    it('should call onOpen without error parameter', async () => {
+    it('should call fallback without error parameter', async () => {
       const openBreaker = ctx.breakers.find((b) => b.state === 'open')
       expect(openBreaker).toBeDefined()
 
-      let onOpenCalled = false
+      let fallbackCalled = false
 
-      const result = await client.withBreaker(openBreaker!.slug, async () => 'work-result', {
-        onOpen: () => {
-          onOpenCalled = true
+      const result = await client.breaker(openBreaker!.slug).protect(async () => 'work-result', {
+        fallback: () => {
+          fallbackCalled = true
           return 'fallback'
         },
       })
 
-      expect(onOpenCalled).toBe(true)
+      expect(fallbackCalled).toBe(true)
       expect(result).toBe('fallback')
     })
   })
@@ -139,8 +139,7 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: withBreaker()', () => {
       expect(closedBreaker).toBeDefined()
 
       await expect(
-        client.withBreaker(
-          closedBreaker!.slug,
+        client.breaker(closedBreaker!.slug).protect(
           async () => {
             await sleep(500)
             return 'should timeout'
@@ -154,8 +153,7 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: withBreaker()', () => {
       const closedBreaker = ctx.breakers.find((b) => b.state === 'closed')
       expect(closedBreaker).toBeDefined()
 
-      const result = await client.withBreaker(
-        closedBreaker!.slug,
+      const result = await client.breaker(closedBreaker!.slug).protect(
         async () => {
           await sleep(50)
           return 'completed'
@@ -167,25 +165,24 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: withBreaker()', () => {
     })
   })
 
-  describe('onUnknown callback', () => {
-    it('should call onUnknown when state cannot be determined', async () => {
+  describe('fail-open behavior', () => {
+    it('should execute work function when state cannot be determined (fail-open)', async () => {
       // Create a client with non-existent system to trigger unknown state
       const badClient = ctx.createSDKClient('non-existent-system-' + Date.now())
 
-      // Don't bootstrap - this will cause state lookup to fail
-      let onUnknownCalled = false
+      // Don't init - this will cause state lookup to fail, triggering fail-open
+      let workFunctionCalled = false
 
-      const result = await badClient.withBreaker('any-breaker', async () => 'work-result', {
-        onUnknown: () => {
-          onUnknownCalled = true
-          return 'unknown-fallback'
-        },
+      const result = await badClient.breaker('any-breaker').protect(async () => {
+        workFunctionCalled = true
+        return 'work-result'
       })
 
-      expect(onUnknownCalled).toBe(true)
-      expect(result).toBe('unknown-fallback')
+      // With fail-open behavior, work function should execute
+      expect(workFunctionCalled).toBe(true)
+      expect(result).toBe('work-result')
 
-      await badClient.shutdown()
+      await badClient.close()
     })
   })
 
@@ -198,8 +195,7 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: withBreaker()', () => {
 
       // Work function completes normally even with signal (signal is for state fetch)
       const controller = new AbortController()
-      const result = await client.withBreaker(
-        closedBreaker!.slug,
+      const result = await client.breaker(closedBreaker!.slug).protect(
         async () => {
           return 'completed'
         },
@@ -219,8 +215,7 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: withBreaker()', () => {
       let workStarted = false
 
       await expect(
-        client.withBreaker(
-          closedBreaker!.slug,
+        client.breaker(closedBreaker!.slug).protect(
           async () => {
             workStarted = true
             return 'result'
@@ -234,21 +229,22 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: withBreaker()', () => {
   })
 })
 
-describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: withBreaker() - concurrent execution', () => {
+describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: protect() - concurrent execution', () => {
   const ctx = setupE2ETest({
     breakerCount: 1,
     breakerStates: ['closed'],
   })
 
-  it('should handle concurrent withBreaker calls', async () => {
+  it('should handle concurrent protect calls', async () => {
     const client = ctx.createSDKClient()
-    await client.bootstrap()
+    client.init()
+    await client.ready()
 
     const closedBreaker = ctx.breakers[0]
 
     // Execute multiple concurrent calls
     const promises = Array.from({ length: 5 }, (_, i) =>
-      client.withBreaker(closedBreaker.slug, async () => {
+      client.breaker(closedBreaker.slug).protect(async () => {
         await sleep(50)
         return `result-${i}`
       }),
@@ -260,6 +256,6 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: withBreaker() - concurrent execu
     expect(results).toContain('result-0')
     expect(results).toContain('result-4')
 
-    await client.shutdown()
+    await client.close()
   })
 })

@@ -1,49 +1,56 @@
-/** Indicates a configuration problem detected at construction time or during method validation. */
+/** Thrown when the SDK is misconfigured (e.g., missing or invalid constructor options). */
 export class ConfigurationError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'ConfigurationError'
   }
 }
-/** Indicates an authentication or authorization failure returned by the identity or API service. */
+
+/** Thrown when authentication fails (invalid credentials or a rejected token refresh). */
 export class AuthError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'AuthError'
   }
 }
-/** Indicates a non-successful HTTP response from the API service. */
+
+/** Thrown on non-auth HTTP errors from the Openfuse API (e.g., 4xx/5xx responses). */
 export class APIError extends Error {
-  constructor(message: string) {
+  readonly statusCode?: number
+  constructor(message: string, statusCode?: number) {
     super(message)
     this.name = 'APIError'
+    this.statusCode = statusCode
   }
 }
-/** Indicates an entity could not be found. */
+
+/** Thrown when a breaker slug does not match any known breaker in the system. */
 export class NotFoundError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'NotFoundError'
   }
 }
-/** Indicates the circuit breaker is open and work must not proceed. */
-export class CircuitOpenError extends Error {
-  constructor(message = 'Breaker is open') {
-    super(message)
-    this.name = 'CircuitOpenError'
-  }
-}
-/** Indicates an operation was aborted via AbortSignal. */
+
+/** Thrown when an operation is cancelled via an {@link AbortSignal}. */
 export class AbortOperationError extends Error {
   constructor(message = 'Operation aborted') {
     super(message)
     this.name = 'AbortOperationError'
   }
 }
-/** Indicates an operation exceeded its timeout. */
+
+/** Thrown when a function wrapped by {@link BreakerHandle.protect} exceeds its `timeout`. */
 export class TimeoutError extends Error {
   constructor(message = 'Operation timed out') {
     super(message)
     this.name = 'TimeoutError'
   }
+}
+
+/** Returns true for 5xx, network, and timeout errors. Returns false for 4xx and NotFoundError. */
+export function isServerOrNetworkError(error: unknown): boolean {
+  if (error instanceof APIError) return !error.statusCode || error.statusCode >= 500
+  if (error instanceof NotFoundError) return false
+  return true
 }

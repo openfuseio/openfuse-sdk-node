@@ -21,19 +21,20 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: metrics collection', () => {
 
   beforeEach(async () => {
     client = ctx.createSDKClient()
-    await client.bootstrap()
+    client.init()
+    await client.ready()
   })
 
   afterEach(async () => {
-    await client.shutdown()
+    await client.close()
   })
 
-  describe('metrics recording via withBreaker()', () => {
+  describe('metrics recording via protect()', () => {
     it('should record success metrics without error', async () => {
       const breaker = ctx.breakers[0]
 
       // Execute successful operation - metrics are recorded internally
-      const result = await client.withBreaker(breaker.slug, async () => {
+      const result = await client.breaker(breaker.slug).protect(async () => {
         await sleep(50)
         return 'success'
       })
@@ -48,7 +49,7 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: metrics collection', () => {
 
       // Execute failing operation
       await expect(
-        client.withBreaker(breaker.slug, async () => {
+        client.breaker(breaker.slug).protect(async () => {
           throw new Error('Test failure')
         }),
       ).rejects.toThrow('Test failure')
@@ -62,8 +63,7 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: metrics collection', () => {
 
       // Execute timing out operation
       await expect(
-        client.withBreaker(
-          breaker.slug,
+        client.breaker(breaker.slug).protect(
           async () => {
             await sleep(200)
             return 'should timeout'
@@ -91,28 +91,30 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: metrics collection', () => {
     })
   })
 
-  describe('shutdown()', () => {
+  describe('close()', () => {
     it('should complete without error', async () => {
       const shutdownClient = ctx.createSDKClient()
-      await shutdownClient.bootstrap()
+      shutdownClient.init()
+      await shutdownClient.ready()
 
       const breaker = ctx.breakers[0]
 
       // Generate some metrics
-      await shutdownClient.withBreaker(breaker.slug, async () => 'test')
+      await shutdownClient.breaker(breaker.slug).protect(async () => 'test')
 
       // Shutdown should complete without error
-      await expect(shutdownClient.shutdown()).resolves.not.toThrow()
+      await expect(shutdownClient.close()).resolves.not.toThrow()
     })
 
     it('should allow operations after shutdown', async () => {
       const shutdownClient = ctx.createSDKClient()
-      await shutdownClient.bootstrap()
+      shutdownClient.init()
+      await shutdownClient.ready()
 
-      await shutdownClient.shutdown()
+      await shutdownClient.close()
 
       // After shutdown, state queries should still work
-      const isOpen = await shutdownClient.isOpen(ctx.breakers[0].slug)
+      const isOpen = await shutdownClient.breaker(ctx.breakers[0].slug).isOpen()
       expect(typeof isOpen).toBe('boolean')
     })
   })
@@ -126,13 +128,14 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: metrics - breaker not found', ()
 
   it('should handle flush gracefully', async () => {
     const client = ctx.createSDKClient()
-    await client.bootstrap()
+    client.init()
+    await client.ready()
 
     // Execute operation and flush - should not throw
-    await client.withBreaker(ctx.breakers[0].slug, async () => 'test')
+    await client.breaker(ctx.breakers[0].slug).protect(async () => 'test')
     await expect(client.flushMetrics()).resolves.not.toThrow()
 
-    await client.shutdown()
+    await client.close()
   })
 })
 
@@ -145,12 +148,12 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: metrics - instance ID', () => {
   it('should use auto-generated instance ID', async () => {
     const client = ctx.createSDKClient()
 
-    const instanceId = client.getInstanceId()
+    const instanceId = client.instanceId
     expect(instanceId).toBeDefined()
     expect(typeof instanceId).toBe('string')
     expect(instanceId.length).toBeGreaterThan(0)
 
-    await client.shutdown()
+    await client.close()
   })
 
   it('should use custom instance ID when provided', async () => {
@@ -160,14 +163,14 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: metrics - instance ID', () => {
 
     const client = new Openfuse({
       baseUrl: E2E_CONFIG.apiBase,
-      systemSlug: ctx.system.slug,
+      system: ctx.system.slug,
       clientId: E2E_CONFIG.clientId,
       clientSecret: E2E_CONFIG.clientSecret,
       instanceId: customInstanceId,
     })
 
-    expect(client.getInstanceId()).toBe(customInstanceId)
+    expect(client.instanceId).toBe(customInstanceId)
 
-    await client.shutdown()
+    await client.close()
   })
 })

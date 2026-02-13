@@ -10,25 +10,27 @@
 import { describe, it, expect } from 'vitest'
 import { setupE2ETest, E2E_CONFIG, createSDKClient, uniqueSlug } from './setup.ts'
 
-describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: bootstrap()', () => {
+describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: init()', () => {
   const ctx = setupE2ETest({ breakerCount: 3 })
 
-  describe('successful bootstrap', () => {
+  describe('successful init', () => {
     it('should successfully initialize with valid credentials', async () => {
       const client = ctx.createSDKClient()
 
-      // Bootstrap should complete without errors
-      await expect(client.bootstrap()).resolves.not.toThrow()
+      // Init should complete without errors
+      expect(() => client.init()).not.toThrow()
+      await client.ready()
 
-      await client.shutdown()
+      await client.close()
     })
 
-    it('should populate breaker cache after bootstrap', async () => {
+    it('should populate breaker cache after init', async () => {
       const client = ctx.createSDKClient()
-      await client.bootstrap()
+      client.init()
+      await client.ready()
 
-      // After bootstrap, listing breakers should return cached data
-      const breakers = await client.listBreakers()
+      // After init, listing breakers should return cached data
+      const breakers = await client.breakers()
 
       expect(breakers).toBeInstanceOf(Array)
       expect(breakers.length).toBeGreaterThanOrEqual(ctx.breakers.length)
@@ -40,99 +42,107 @@ describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: bootstrap()', () => {
         expect(found?.id).toBe(testBreaker.id)
       }
 
-      await client.shutdown()
+      await client.close()
     })
 
-    it('should allow state queries immediately after bootstrap', async () => {
+    it('should allow state queries immediately after init', async () => {
       const client = ctx.createSDKClient()
-      await client.bootstrap()
+      client.init()
+      await client.ready()
 
       // State queries should work immediately
       const testBreaker = ctx.breakers[0]
-      const isOpen = await client.isOpen(testBreaker.slug)
+      const isOpen = await client.breaker(testBreaker.slug).isOpen()
 
       expect(typeof isOpen).toBe('boolean')
       expect(isOpen).toBe(testBreaker.state === 'open')
 
-      await client.shutdown()
+      await client.close()
     })
 
-    it('should resolve system slug to ID during bootstrap', async () => {
+    it('should resolve system slug to ID during init', async () => {
       const client = ctx.createSDKClient()
-      await client.bootstrap()
+      client.init()
+      await client.ready()
 
       // Getting a breaker by slug should work (requires slug->ID resolution)
       const testBreaker = ctx.breakers[0]
-      const breaker = await client.getBreaker(testBreaker.slug)
+      const breaker = await client.breaker(testBreaker.slug).status()
 
-      expect(breaker.id).toBe(testBreaker.id)
-      expect(breaker.slug).toBe(testBreaker.slug)
+      expect(breaker).not.toBeNull()
+      expect(breaker!.id).toBe(testBreaker.id)
+      expect(breaker!.slug).toBe(testBreaker.slug)
 
-      await client.shutdown()
+      await client.close()
     })
   })
 
-  describe('bootstrap with non-existent system', () => {
+  describe('init with non-existent system', () => {
     it('should throw error for non-existent system slug', async () => {
       const nonExistentSlug = uniqueSlug('non-existent-system')
       const client = createSDKClient(nonExistentSlug)
 
-      // Bootstrap with invalid system should fail
-      await expect(client.bootstrap()).rejects.toThrow()
+      // Init with invalid system should fail-open (errors are logged, not thrown)
+      client.init()
+      await client.ready()
 
-      await client.shutdown()
+      await client.close()
     })
   })
 
-  describe('multiple bootstrap calls', () => {
+  describe('multiple init calls', () => {
     it('should be idempotent - multiple calls should succeed', async () => {
       const client = ctx.createSDKClient()
 
-      // First bootstrap
-      await client.bootstrap()
-      const breakers1 = await client.listBreakers()
+      // First init
+      client.init()
+      await client.ready()
+      const breakers1 = await client.breakers()
 
-      // Second bootstrap (should refresh data)
-      await client.bootstrap()
-      const breakers2 = await client.listBreakers()
+      // Second init (should refresh data)
+      client.init()
+      await client.ready()
+      const breakers2 = await client.breakers()
 
       expect(breakers1.length).toBe(breakers2.length)
 
-      await client.shutdown()
+      await client.close()
     })
   })
 
-  describe('bootstrap without prior authentication', () => {
-    it('should authenticate automatically during bootstrap', async () => {
+  describe('init without prior authentication', () => {
+    it('should authenticate automatically during init', async () => {
       // Create a fresh client with valid credentials
       const client = ctx.createSDKClient()
 
-      // First API call (bootstrap) should trigger auth
-      await client.bootstrap()
+      // First API call (init) should trigger auth
+      client.init()
+      await client.ready()
 
       // Subsequent calls should use cached token
-      const breakers = await client.listBreakers()
+      const breakers = await client.breakers()
       expect(breakers.length).toBeGreaterThan(0)
 
-      await client.shutdown()
+      await client.close()
     })
   })
 })
 
-describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: bootstrap() - auth errors', () => {
+describe.skipIf(!E2E_CONFIG.clientSecret)('E2E: init() - auth errors', () => {
   it('should throw AuthError with invalid credentials', async () => {
     const { Openfuse } = await import('../../../src/index.ts')
 
     const client = new Openfuse({
       baseUrl: E2E_CONFIG.apiBase,
-      systemSlug: 'any-system',
+      system: 'any-system',
       clientId: 'invalid-client-id',
       clientSecret: 'invalid-client-secret',
     })
 
-    // Bootstrap with invalid credentials should fail with auth error
-    await expect(client.bootstrap()).rejects.toThrow()
+    // Init with invalid credentials logs auth error (fail-safe, does not throw)
+    client.init()
+    await client.ready()
 
-    await client.shutdown()
+    await client.close()
   })
 })

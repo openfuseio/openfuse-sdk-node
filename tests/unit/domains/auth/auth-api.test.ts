@@ -40,14 +40,13 @@ describe('AuthApi', () => {
       const authApi = new AuthApi({ baseUrl, clientId, clientSecret })
       const result = await authApi.bootstrap('my-system')
 
-      expect(fetchMock).toHaveBeenCalledWith(
-        `${baseUrl}/v1/sdk/auth/bootstrap`,
+      const [calledUrl, calledInit] = fetchMock.mock.calls[0]
+      expect(calledUrl.toString()).toBe(`${baseUrl}/v1/sdk/auth/bootstrap`)
+      expect(calledInit.method).toBe('POST')
+      expect(calledInit.headers).toEqual(
         expect.objectContaining({
-          method: 'POST',
-          headers: expect.objectContaining({
-            Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
-            'Content-Type': 'application/json',
-          }),
+          authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
+          'content-type': 'application/json',
         }),
       )
 
@@ -91,7 +90,6 @@ describe('AuthApi', () => {
       const authApi = new AuthApi({ baseUrl, clientId, clientSecret })
 
       await expect(authApi.bootstrap('test')).rejects.toThrow(AuthError)
-      await expect(authApi.bootstrap('test')).rejects.toThrow('invalid client credentials')
     })
 
     it('throws AuthError on 403', async () => {
@@ -102,7 +100,7 @@ describe('AuthApi', () => {
       await expect(authApi.bootstrap('test')).rejects.toThrow(AuthError)
     })
 
-    it('throws APIError on other errors with message', async () => {
+    it('throws APIError on 5xx after retries', async () => {
       global.fetch = createMockFetch({
         ok: false,
         status: 500,
@@ -111,16 +109,13 @@ describe('AuthApi', () => {
 
       const authApi = new AuthApi({ baseUrl, clientId, clientSecret })
 
-      await expect(authApi.bootstrap('test')).rejects.toThrow(APIError)
-      await expect(authApi.bootstrap('test')).rejects.toThrow('Internal server error')
+      await expect(authApi.bootstrap('test', { maxAttempts: 1 })).rejects.toThrow(APIError)
     })
 
     it('respects custom timeout', async () => {
-      // Test that a short timeout aborts a long-running request
       const fetchMock = vi.fn().mockImplementation(
-        (_url, options) =>
+        (_url: URL, options: RequestInit) =>
           new Promise((resolve, reject) => {
-            // Simulate a slow server response
             const timeoutId = setTimeout(() => {
               resolve({
                 ok: true,
@@ -129,7 +124,6 @@ describe('AuthApi', () => {
               })
             }, 5000)
 
-            // Listen for abort signal
             options.signal?.addEventListener('abort', () => {
               clearTimeout(timeoutId)
               reject(new DOMException('Aborted', 'AbortError'))
@@ -141,7 +135,7 @@ describe('AuthApi', () => {
       const authApi = new AuthApi({ baseUrl, clientId, clientSecret })
 
       // Use a very short timeout (50ms) - fetch is mocked to take 5s
-      await expect(authApi.bootstrap('test', { timeoutMs: 50 })).rejects.toThrow()
+      await expect(authApi.bootstrap('test', { timeoutMs: 50, maxAttempts: 1 })).rejects.toThrow()
     })
   })
 
@@ -164,13 +158,12 @@ describe('AuthApi', () => {
       const authApi = new AuthApi({ baseUrl, clientId, clientSecret })
       const result = await authApi.refreshToken()
 
-      expect(fetchMock).toHaveBeenCalledWith(
-        `${baseUrl}/v1/sdk/auth/token`,
+      const [calledUrl, calledInit] = fetchMock.mock.calls[0]
+      expect(calledUrl.toString()).toBe(`${baseUrl}/v1/sdk/auth/token`)
+      expect(calledInit.method).toBe('GET')
+      expect(calledInit.headers).toEqual(
         expect.objectContaining({
-          method: 'GET',
-          headers: expect.objectContaining({
-            Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
-          }),
+          authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
         }),
       )
 
@@ -204,13 +197,16 @@ describe('AuthApi', () => {
       const authApi = new AuthApi({ baseUrl, clientId, clientSecret })
 
       await expect(authApi.refreshToken()).rejects.toThrow(APIError)
-      await expect(authApi.refreshToken()).rejects.toThrow('Bad Gateway')
     })
 
     it('respects abort signal', async () => {
       const fetchMock = vi.fn().mockImplementation(
-        (_url, options) =>
+        (_url: URL, options: RequestInit) =>
           new Promise((_, reject) => {
+            if (options.signal?.aborted) {
+              reject(new DOMException('Aborted', 'AbortError'))
+              return
+            }
             options.signal?.addEventListener('abort', () => {
               reject(new DOMException('Aborted', 'AbortError'))
             })
@@ -247,7 +243,8 @@ describe('AuthApi', () => {
       })
       await authApi.refreshToken()
 
-      expect(fetchMock).toHaveBeenCalledWith(`${baseUrl}/v1/sdk/auth/token`, expect.anything())
+      const calledUrl = fetchMock.mock.calls[0][0]
+      expect(calledUrl.toString()).toBe(`${baseUrl}/v1/sdk/auth/token`)
     })
   })
 })

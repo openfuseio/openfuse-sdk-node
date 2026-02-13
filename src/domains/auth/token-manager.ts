@@ -1,11 +1,15 @@
-import { AuthError } from '../../core/errors.ts'
-import type { TTokenProvider } from '../../core/types.ts'
+import { AbortOperationError, AuthError } from '../../core/errors.ts'
+import { logger } from '../../core/logger.ts'
+import { calculateBackoff, sleep } from '../../core/retry.ts'
+import type { TAuthProvider } from '../../core/types.ts'
+import { createTimeoutSignal } from '../../core/utils.ts'
 import type { AuthApi } from './auth.api.ts'
 
 const DEFAULT_REFRESH_BUFFER_MS = 30_000
 const DEFAULT_RETRY_ATTEMPTS = 3
 const DEFAULT_RETRY_BASE_DELAY_MS = 100
 const DEFAULT_RETRY_MAX_DELAY_MS = 2000
+const DEFAULT_REFRESH_TIMEOUT_MS = 5_000
 
 export type TTokenManagerOptions = {
   authApi: AuthApi
@@ -17,6 +21,8 @@ export type TTokenManagerOptions = {
   retryBaseDelayMs?: number
   /** Maximum delay in ms for exponential backoff (default: 2000) */
   retryMaxDelayMs?: number
+  /** Maximum total time in ms for a coalesced refresh attempt (default: 5000) */
+  refreshTimeoutMs?: number
 }
 
 type TCachedToken = {
@@ -34,15 +40,17 @@ type TCachedToken = {
  * - Request coalescing for concurrent refresh attempts
  * - Each caller gets independent abort handling
  */
-export class TokenManager implements TTokenProvider {
+export class TokenManager implements TAuthProvider {
   private readonly authApi: AuthApi
   private readonly refreshBufferMs: number
   private readonly retryAttempts: number
   private readonly retryBaseDelayMs: number
   private readonly retryMaxDelayMs: number
+  private readonly refreshTimeoutMs: number
 
   private cachedToken: TCachedToken | null = null
   private pendingRefresh: Promise<string> | null = null
+  private hasBootstrapped = false
 
   constructor(options: TTokenManagerOptions) {
     this.authApi = options.authApi
@@ -50,98 +58,115 @@ export class TokenManager implements TTokenProvider {
     this.retryAttempts = options.retryAttempts ?? DEFAULT_RETRY_ATTEMPTS
     this.retryBaseDelayMs = options.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS
     this.retryMaxDelayMs = options.retryMaxDelayMs ?? DEFAULT_RETRY_MAX_DELAY_MS
+    this.refreshTimeoutMs = options.refreshTimeoutMs ?? DEFAULT_REFRESH_TIMEOUT_MS
   }
 
-  /**
-   * Store a token received from bootstrap or refresh.
-   */
   setToken(accessToken: string, expiresIn: number): void {
+    this.hasBootstrapped = true
     this.cachedToken = {
       token: accessToken,
       expiresAtMs: Date.now() + expiresIn * 1000,
     }
   }
 
+  async getAuthHeaders(signal?: AbortSignal): Promise<Record<string, string>> {
+    const token = await this.getToken(signal)
+    return { authorization: `Bearer ${token}` }
+  }
+
+  onAuthFailure(): void {
+    this.clearCache()
+  }
+
   /**
    * Returns a valid access token, refreshing if near expiry.
    *
-   * Behavior:
    * - If token is valid and not near expiry, returns immediately
-   * - If token needs refresh, attempts refresh with retry logic
-   * - If refresh fails but token isn't fully expired, returns old token
-   * - If refresh fails and token is expired, throws AuthError
+   * - If token needs proactive refresh but is not expired, returns old token and refreshes in background
+   * - If token is fully expired or missing, blocks until refresh completes
    */
   async getToken(signal?: AbortSignal): Promise<string> {
-    // Check if already aborted
     if (signal?.aborted) {
-      throw new AuthError('Token refresh aborted')
+      throw new AbortOperationError('Token refresh aborted')
     }
 
-    // If token is valid and not near expiry, return it
     if (this.cachedToken && !this.needsRefresh()) {
       return this.cachedToken.token
     }
 
-    // No token at all - need to bootstrap first
     if (!this.cachedToken) {
-      throw new AuthError('No access token available. Call bootstrap() first.')
-    }
-
-    // Token needs refresh - try to refresh with coalescing
-    try {
+      if (!this.hasBootstrapped) {
+        throw new AuthError('No access token available. Call bootstrap() first.')
+      }
       return await this.refreshWithCoalescing(signal)
-    } catch (refreshError) {
-      // Don't fall back on auth errors - credentials are invalid
-      if (refreshError instanceof AuthError) {
-        throw refreshError
-      }
-
-      // Refresh failed - fallback to old token if not fully expired
-      if (this.cachedToken && !this.isExpired()) {
-        return this.cachedToken.token
-      }
-
-      // Token is fully expired and refresh failed
-      throw refreshError
     }
+
+    if (!this.isExpired()) {
+      this.startBackgroundRefresh()
+      return this.cachedToken.token
+    }
+
+    return await this.refreshWithCoalescing(signal)
   }
 
-  /**
-   * Coalesces concurrent refresh requests into a single API call.
-   * Each caller can still abort independently without affecting others.
-   */
-  private async refreshWithCoalescing(signal?: AbortSignal): Promise<string> {
-    // If a refresh is already in progress, wait for it
-    if (this.pendingRefresh) {
-      try {
-        return await this.pendingRefresh
-      } catch {
-        // If the shared refresh failed, try our own refresh
-        // (the original caller's abort might have caused the failure)
-        return await this.doRefreshWithRetry(signal)
-      }
-    }
+  private startBackgroundRefresh(): void {
+    if (this.pendingRefresh) return
 
-    // Start a new refresh (without abort signal to avoid one caller aborting for all)
-    this.pendingRefresh = this.doRefreshWithRetry()
-
-    try {
-      return await this.pendingRefresh
-    } finally {
+    const { signal, cleanup } = createTimeoutSignal(this.refreshTimeoutMs)
+    this.pendingRefresh = this.doRefreshWithRetry(signal).finally(() => {
+      cleanup()
       this.pendingRefresh = null
+    })
+    this.pendingRefresh.catch((error) => {
+      logger.warn('Background token refresh failed:', error)
+    })
+  }
+
+  private async refreshWithCoalescing(signal?: AbortSignal): Promise<string> {
+    if (!this.pendingRefresh) {
+      const { signal: timeoutSignal, cleanup } = createTimeoutSignal(this.refreshTimeoutMs)
+
+      this.pendingRefresh = this.doRefreshWithRetry(timeoutSignal).finally(() => {
+        cleanup()
+        this.pendingRefresh = null
+      })
+      // Prevent unhandled rejection if all callers bail via abort
+      this.pendingRefresh.catch(() => {})
+    }
+
+    if (signal?.aborted) {
+      throw new AbortOperationError('Token refresh aborted')
+    }
+
+    if (!signal) {
+      return await this.pendingRefresh
+    }
+
+    let abortHandler: (() => void) | undefined
+    try {
+      return await Promise.race([
+        this.pendingRefresh,
+        new Promise<never>((_, reject) => {
+          const onAbort = () => reject(new AbortOperationError('Token refresh aborted'))
+          if (signal.aborted) {
+            onAbort()
+            return
+          }
+          abortHandler = onAbort
+          signal.addEventListener('abort', onAbort, { once: true })
+        }),
+      ])
+    } finally {
+      if (abortHandler) signal.removeEventListener('abort', abortHandler)
     }
   }
 
-  /**
-   * Performs token refresh with exponential backoff retry.
-   */
   private async doRefreshWithRetry(signal?: AbortSignal): Promise<string> {
     let lastError: Error | undefined
 
     for (let attempt = 0; attempt < this.retryAttempts; attempt++) {
-      // Check if aborted before attempting
       if (signal?.aborted) {
-        throw new AuthError('Token refresh aborted')
+        throw new AbortOperationError('Token refresh aborted')
       }
 
       try {
@@ -156,20 +181,12 @@ export class TokenManager implements TTokenProvider {
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error))
 
-        // Don't retry on auth errors (invalid credentials)
-        if (error instanceof AuthError) {
-          throw error
-        }
+        if (error instanceof AuthError) throw error
+        if (signal?.aborted) throw new AbortOperationError('Token refresh aborted')
 
-        // Don't retry if aborted
-        if (signal?.aborted) {
-          throw new AuthError('Token refresh aborted')
-        }
-
-        // Wait before retrying (unless this was the last attempt)
         if (attempt < this.retryAttempts - 1) {
-          const delay = this.calculateBackoff(attempt)
-          await this.sleep(delay, signal)
+          const delay = calculateBackoff(attempt, this.retryBaseDelayMs, this.retryMaxDelayMs)
+          await sleep(delay, signal)
         }
       }
     }
@@ -177,65 +194,17 @@ export class TokenManager implements TTokenProvider {
     throw lastError ?? new AuthError('Token refresh failed after retries')
   }
 
-  private calculateBackoff(attemptIndex: number): number {
-    const exponential = Math.min(
-      this.retryMaxDelayMs,
-      this.retryBaseDelayMs * Math.pow(2, attemptIndex),
-    )
-    const jitter = Math.random() * 0.25 * exponential
-    return exponential + jitter
-  }
-
-  private sleep(ms: number, signal?: AbortSignal): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const timeoutId = setTimeout(resolve, ms)
-
-      if (signal) {
-        if (signal.aborted) {
-          clearTimeout(timeoutId)
-          reject(new AuthError('Token refresh aborted'))
-          return
-        }
-
-        signal.addEventListener(
-          'abort',
-          () => {
-            clearTimeout(timeoutId)
-            reject(new AuthError('Token refresh aborted'))
-          },
-          { once: true },
-        )
-      }
-    })
-  }
-
-  /**
-   * Check if token needs proactive refresh (within buffer of expiry).
-   */
   private needsRefresh(): boolean {
     if (!this.cachedToken) return true
     return Date.now() >= this.cachedToken.expiresAtMs - this.refreshBufferMs
   }
 
-  /**
-   * Check if token is fully expired (past expiry time).
-   */
   private isExpired(): boolean {
     if (!this.cachedToken) return true
     return Date.now() >= this.cachedToken.expiresAtMs
   }
 
-  /**
-   * Clear the cached token. Called by Transport on 401 responses.
-   */
-  clearCache(): void {
+  private clearCache(): void {
     this.cachedToken = null
-  }
-
-  /**
-   * Check if a token is currently cached.
-   */
-  hasToken(): boolean {
-    return this.cachedToken !== null
   }
 }

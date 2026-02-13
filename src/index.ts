@@ -4,13 +4,16 @@ export type { TOpenfuseCloudOptions } from './client/openfuse-cloud.ts'
 export { Openfuse } from './client/openfuse.ts'
 export type { TOpenfuseOptions } from './client/openfuse.ts'
 
+// Breaker handle
+export { BreakerHandle } from './client/breaker-handle.ts'
+export type { TProtectOptions } from './client/breaker-handle.ts'
+
 // Errors
 export {
   ConfigurationError,
   AuthError,
   APIError,
   NotFoundError,
-  CircuitOpenError,
   AbortOperationError,
   TimeoutError,
 } from './core/errors.ts'

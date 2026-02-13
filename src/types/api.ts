@@ -1,15 +1,29 @@
+/**
+ * Possible states of a circuit breaker.
+ * - `'closed'`: traffic flows normally.
+ * - `'open'`: traffic is blocked; the upstream dependency is considered unhealthy.
+ * - `'half-open'`: a limited number of probe requests are allowed through to test recovery.
+ */
 export type TBreakerStateValue = 'open' | 'closed' | 'half-open'
 
+/** A circuit breaker and its current state. */
 export type TBreaker = {
+  /** Unique breaker ID (server-assigned). */
   id: string
+  /** Human-readable slug used in SDK methods (e.g., `'stripe-api'`). */
   slug: string
+  /** Current breaker state. */
   state: TBreakerStateValue
+  /** ISO-8601 timestamp of the last state change. */
   updatedAt?: string
+  /** ISO-8601 timestamp after which the breaker may transition out of `open`. `null` if not applicable. */
   retryAfter?: string | null
 }
 
+/** Breaker state as returned by the state endpoint. */
 export type TBreakerStateResponse = {
   state: TBreakerStateValue
+  /** ISO-8601 timestamp of the last state change. */
   updatedAt?: string
 }
 

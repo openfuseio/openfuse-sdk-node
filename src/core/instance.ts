@@ -106,10 +106,19 @@ function buildInstanceId(identifier: string, pid: number, random: string): strin
  */
 export function generateInstanceId(): string {
   const pid = process.pid
-  const random = randomUUID().slice(0, RANDOM_SUFFIX_LENGTH)
+  const random = (randomUUID() ?? Math.random().toString(36).slice(2)).slice(
+    0,
+    RANDOM_SUFFIX_LENGTH,
+  )
 
   const detected = detectPlatform()
-  const identifier = detected ? `${detected.prefix}-${detected.identifier}` : hostname()
+  let fallbackHostname: string
+  try {
+    fallbackHostname = hostname()
+  } catch {
+    fallbackHostname = 'unknown'
+  }
+  const identifier = detected ? `${detected.prefix}-${detected.identifier}` : fallbackHostname
 
   return buildInstanceId(identifier, pid, random)
 }

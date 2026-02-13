@@ -1,3 +1,7 @@
+/**
+ * Configuration for the SDK's client-side metrics aggregation.
+ * Pass a partial config via {@link TOpenfuseOptions.metrics} to override server defaults.
+ */
 export type TMetricsConfig = {
   /** Size of aggregation windows in milliseconds (default: 10s) */
   windowSizeMs: number
