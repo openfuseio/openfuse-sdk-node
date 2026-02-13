@@ -77,10 +77,10 @@ export type TOpenfuseOptions = {
  * ```
  */
 export class Openfuse {
-  protected readonly transport: Transport
+  private readonly transport: Transport
   private readonly authApi: AuthApi
   private readonly tokenManager: TokenManager
-  protected readonly baseUrl: string
+  private readonly baseUrl: string
   private readonly system: string
   private readonly _instanceId: string
   private readonly metricsApi: MetricsApi
@@ -94,7 +94,7 @@ export class Openfuse {
   private notFoundWarnings = new TTLCache<string, true>({
     maximumEntries: NOT_FOUND_WARNING_MAX_ENTRIES,
   })
-  protected bootstrapData?: TSdkBootstrapResponse
+  private bootstrapData?: TSdkBootstrapResponse
 
   private bootstrapRetryTimer: ReturnType<typeof setTimeout> | undefined
   private bootstrapAbortController: AbortController | null = null
@@ -178,11 +178,6 @@ export class Openfuse {
         maxAttempts: this.bootstrapMaxAttempts,
       })
       this.applyBootstrapResponse(response)
-      try {
-        await this.onBootstrapComplete()
-      } catch (hookError) {
-        logger.warn('Post-bootstrap hook failed:', hookError)
-      }
     } catch (error) {
       if (error instanceof AuthError) {
         logger.error(
@@ -223,6 +218,14 @@ export class Openfuse {
       this.metricsFeature = this.createMetricsFeature()
     }
 
+    // Update transport URL with environment-scoped hostname
+    if (response.environment?.slug && response.company?.slug) {
+      const { environment, company } = response
+      const url = new URL(this.baseUrl)
+      url.hostname = `${environment.slug}-${company.slug}.${url.hostname}`
+      this.transport.setBaseUrl(url.origin)
+    }
+
     if (response.breakers && response.breakers.length > 0) {
       const breakers: TBreaker[] = response.breakers.map((b) => ({
         id: b.id,
@@ -251,11 +254,6 @@ export class Openfuse {
         })
         this.applyBootstrapResponse(response)
         logger.warn('Bootstrap retry succeeded.')
-        try {
-          await this.onBootstrapComplete()
-        } catch (hookError) {
-          logger.warn('Post-bootstrap hook failed:', hookError)
-        }
       } catch (error) {
         if (error instanceof AuthError) {
           logger.warn('Bootstrap retry failed with AuthError, stopping retries.', error)
@@ -301,13 +299,6 @@ export class Openfuse {
   public ready(): Promise<void> {
     return this.pendingBootstrap ?? Promise.resolve()
   }
-
-  /**
-   * Hook called after a successful bootstrap. Override in subclasses to run
-   * additional setup (e.g., reconfiguring the transport URL).
-   * Errors thrown here are caught and logged. They do not break bootstrap.
-   */
-  protected async onBootstrapComplete(): Promise<void> {}
 
   /**
    * Returns a {@link BreakerHandle} bound to the given slug.

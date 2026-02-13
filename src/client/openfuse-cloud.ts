@@ -1,4 +1,3 @@
-import { logger } from '../core/logger.ts'
 import type { TMetricsConfig } from '../domains/metrics/types.ts'
 import { Openfuse } from './openfuse.ts'
 
@@ -44,17 +43,5 @@ export class OpenfuseCloud extends Openfuse {
       metrics: options.metrics,
       instanceId: options.instanceId,
     })
-  }
-
-  protected override async onBootstrapComplete(): Promise<void> {
-    if (!this.bootstrapData?.environment?.slug || !this.bootstrapData?.company?.slug) {
-      logger.warn('Bootstrap response missing routing data, using default API URL.')
-      return
-    }
-
-    const { environment, company } = this.bootstrapData
-    const url = new URL(this.baseUrl)
-    url.hostname = `${environment.slug}-${company.slug}.${url.hostname}`
-    this.transport.setBaseUrl(url.origin)
   }
 }
