@@ -1,10 +1,5 @@
-import {
-  AuthError,
-  CircuitOpenError,
-  ConfigurationError,
-  NotFoundError,
-  TimeoutError,
-} from '../core/errors.ts'
+import { TTLCache } from '../core/cache.ts'
+import { AuthError, ConfigurationError, NotFoundError, TimeoutError } from '../core/errors.ts'
 import { logger } from '../core/logger.ts'
 import { ApiHealthTracker } from '../core/api-health.ts'
 import { generateInstanceId } from '../core/instance.ts'
@@ -23,16 +18,18 @@ import { MetricsApi } from '../domains/metrics/metrics.api.ts'
 import { MetricsFeature } from '../domains/metrics/metrics.feature.ts'
 import type { TMetricsConfig } from '../domains/metrics/types.ts'
 import type { TBreaker, TBreakerStateValue, TSdkBootstrapResponse } from '../types/api.ts'
+import { BreakerHandle, type TBreakerOperations, type TProtectOptions } from './breaker-handle.ts'
 
 const STATE_FETCH_BUDGET_MS = 500
 const BOOTSTRAP_RETRY_CAP_MS = 30_000
-const MAX_NOT_FOUND_WARNINGS = 1_000
+const NOT_FOUND_WARNING_TTL_MS = 5 * 60 * 1_000
+const NOT_FOUND_WARNING_MAX_ENTRIES = 1_000
 
 export type TOpenfuseOptions = {
   /** API base URL (e.g., https://prod-acme.api.openfuse.io) */
   baseUrl: string
   /** System slug that groups related breakers */
-  systemSlug: string
+  system: string
   /** SDK client ID from Openfuse dashboard */
   clientId: string
   /** SDK client secret from Openfuse dashboard */
@@ -47,46 +44,35 @@ export type TOpenfuseOptions = {
   instanceId?: string
 }
 
-type TWithBreakerOptions<T> = {
-  /** If exceeded, throws TimeoutError. */
-  timeout?: number
-  /** Fallback if the breaker is open. */
-  onOpen?: () => Promise<T> | T
-  /** Fallback if the breaker state is unknown (e.g., network failure fetching state). */
-  onUnknown?: () => Promise<T> | T
-  /** AbortSignal for cancellation. */
-  signal?: AbortSignal
-}
-
 /**
  * Openfuse SDK client. Manages remote circuit breakers and records execution metrics.
  *
  * Typical lifecycle:
  * 1. Create the client with your credentials.
- * 2. Call {@link bootstrap} once at startup to authenticate and pre-cache breaker state.
- * 3. Wrap downstream calls with {@link withBreaker} for automatic state checks, metrics,
- *    timeouts, and fallback handling.
- * 4. Call {@link shutdown} on process exit to flush pending metrics.
+ * 2. Call {@link init} once at startup to authenticate and pre-cache breaker state.
+ * 3. Wrap downstream calls with {@link BreakerHandle.protect} for automatic state checks,
+ *    metrics, timeouts, and fallback handling.
+ * 4. Call {@link close} on process exit to flush pending metrics.
  *
- * The SDK is **fail-open**: if the Openfuse API is unreachable or bootstrap hasn't
+ * The SDK is **fail-open**: if the Openfuse API is unreachable or init hasn't
  * completed yet, breakers default to closed and your code executes normally.
  *
  * @example
  * ```typescript
  * const client = new Openfuse({
  *   baseUrl: 'https://prod-acme.api.openfuse.io',
- *   systemSlug: 'payments',
+ *   system: 'payments',
  *   clientId: 'sdk_abc123',
  *   clientSecret: 'secret_xyz',
  * })
  *
- * client.bootstrap()
+ * client.init()
  *
- * const charge = await client.withBreaker('stripe-api', async (signal) => {
+ * const charge = await client.breaker('stripe-api').protect(async (signal) => {
  *   return stripe.charges.create({ amount: 1000 }, { signal })
  * }, {
  *   timeout: 5000,
- *   onOpen: () => ({ queued: true }),
+ *   fallback: () => ({ queued: true }),
  * })
  * ```
  */
@@ -95,8 +81,8 @@ export class Openfuse {
   private readonly authApi: AuthApi
   private readonly tokenManager: TokenManager
   protected readonly baseUrl: string
-  private readonly systemSlug: string
-  private readonly instanceId: string
+  private readonly system: string
+  private readonly _instanceId: string
   private readonly metricsApi: MetricsApi
   private readonly apiHealthTracker: ApiHealthTracker
 
@@ -105,7 +91,9 @@ export class Openfuse {
   private metricsConfig?: Partial<TMetricsConfig>
   private pendingBootstrap: Promise<void> | null = null
   private bootstrapWarningLogged = false
-  private notFoundWarnings: Set<string> = new Set()
+  private notFoundWarnings = new TTLCache<string, true>({
+    maximumEntries: NOT_FOUND_WARNING_MAX_ENTRIES,
+  })
   protected bootstrapData?: TSdkBootstrapResponse
 
   private bootstrapRetryTimer: ReturnType<typeof setTimeout> | undefined
@@ -114,12 +102,14 @@ export class Openfuse {
   private bootstrapMaxAttempts?: number
   private isShuttingDown = false
 
+  private _breakerOps: TBreakerOperations | undefined
+
   constructor(options: TOpenfuseOptions) {
-    validateRequiredStrings(options, ['baseUrl', 'systemSlug', 'clientId', 'clientSecret'])
+    validateRequiredStrings(options, ['baseUrl', 'system', 'clientId', 'clientSecret'])
 
     this.baseUrl = normalizeBaseUrl(options.baseUrl)
-    this.systemSlug = options.systemSlug
-    this.instanceId = options.instanceId ?? generateInstanceId()
+    this.system = options.system
+    this._instanceId = options.instanceId ?? generateInstanceId()
     this.metricsConfig = options.metrics
     this.apiHealthTracker = new ApiHealthTracker()
 
@@ -157,16 +147,16 @@ export class Openfuse {
    * Never throws; errors are logged via `console.warn`.
    *
    * @param options.timeoutMs - Per-attempt timeout in milliseconds (default: 5000).
-   * @param options.maxAttempts - Max retries for the bootstrap HTTP call (default: 3).
+   * @param options.maxAttempts - Max retries for the init HTTP call (default: 3).
    *
    * @example
    * ```typescript
    * const client = new Openfuse({ ... })
-   * client.bootstrap()
+   * client.init()
    * // SDK methods are usable immediately
    * ```
    */
-  public bootstrap(options?: { timeoutMs?: number; maxAttempts?: number }): void {
+  public init(options?: { timeoutMs?: number; maxAttempts?: number }): void {
     if (this.pendingBootstrap) return
     this.cancelBootstrapRetry()
 
@@ -181,8 +171,8 @@ export class Openfuse {
 
   private async doBootstrap(): Promise<void> {
     try {
-      const response = await this.authApi.bootstrap(this.systemSlug, {
-        instanceId: this.instanceId,
+      const response = await this.authApi.bootstrap(this.system, {
+        instanceId: this._instanceId,
         signal: this.bootstrapAbortController?.signal,
         timeoutMs: this.bootstrapTimeoutMs,
         maxAttempts: this.bootstrapMaxAttempts,
@@ -253,8 +243,8 @@ export class Openfuse {
       if (this.isShuttingDown || this.bootstrapAbortController?.signal.aborted) return
 
       try {
-        const response = await this.authApi.bootstrap(this.systemSlug, {
-          instanceId: this.instanceId,
+        const response = await this.authApi.bootstrap(this.system, {
+          instanceId: this._instanceId,
           signal: this.bootstrapAbortController?.signal,
           timeoutMs: this.bootstrapTimeoutMs,
           maxAttempts: this.bootstrapMaxAttempts,
@@ -294,21 +284,21 @@ export class Openfuse {
   }
 
   /**
-   * Returns a promise that resolves when the current bootstrap attempt completes.
-   * Resolves immediately if bootstrap is not in progress.
+   * Returns a promise that resolves when the current init attempt completes.
+   * Resolves immediately if init is not in progress.
    *
    * @remarks Not required for normal usage. The SDK is usable immediately after
-   * calling {@link bootstrap}. Use this only when you need to guarantee that
-   * bootstrap has finished (e.g., in tests or health-check endpoints).
+   * calling {@link init}. Use this only when you need to guarantee that
+   * init has finished (e.g., in tests or health-check endpoints).
    *
    * @example
    * ```typescript
-   * client.bootstrap()
-   * await client.whenReady()
-   * // bootstrap has completed (or was never started)
+   * client.init()
+   * await client.ready()
+   * // init has completed (or was never started)
    * ```
    */
-  public whenReady(): Promise<void> {
+  public ready(): Promise<void> {
     return this.pendingBootstrap ?? Promise.resolve()
   }
 
@@ -320,101 +310,54 @@ export class Openfuse {
   protected async onBootstrapComplete(): Promise<void> {}
 
   /**
-   * Checks whether a breaker is currently **open** (blocking traffic).
+   * Returns a {@link BreakerHandle} bound to the given slug.
    *
-   * @remarks For automatic metrics, timeouts, and fallback handling, prefer {@link withBreaker}.
-   * On errors (API unreachable, not bootstrapped), returns `false` (fail-open).
+   * The handle is a thin proxy — no API call, no caching. All methods on the
+   * handle delegate back to this client's internal implementation.
    *
-   * @param breakerSlug - The breaker's slug as configured in the dashboard.
-   * @returns `true` if open, `false` if closed, half-open, or state unknown.
+   * @param slug - The breaker's slug as configured in the dashboard.
    *
    * @example
    * ```typescript
-   * if (await client.isOpen('stripe-api')) {
+   * const stripe = client.breaker('stripe-api')
+   *
+   * const charge = await stripe.protect(async (signal) => {
+   *   return stripe.charges.create({ amount: 1000 }, { signal })
+   * }, { timeout: 5000, fallback: () => ({ queued: true }) })
+   *
+   * if (await stripe.isOpen()) {
    *   return cachedResponse
    * }
    * ```
    */
-  public async isOpen(breakerSlug: string): Promise<boolean> {
-    try {
-      const state = await this.fetchBreakerStateWithBudget(breakerSlug)
-      return state === 'open'
-    } catch (error) {
-      this.handleFailOpen('isOpen', breakerSlug, error)
-      return false
+  public breaker(slug: string): BreakerHandle {
+    return new BreakerHandle(slug, this.breakerOps)
+  }
+
+  private get breakerOps(): TBreakerOperations {
+    if (!this._breakerOps) {
+      this._breakerOps = {
+        protect: (slug, fn, opts) => this.executeProtected(slug, fn, opts),
+        isOpen: (slug) => this.checkIsOpen(slug),
+        isClosed: (slug) => this.checkIsClosed(slug),
+        fetchStatus: (slug, signal) => this.fetchBreakerStatus(slug, signal),
+      }
     }
+    return this._breakerOps
   }
 
   /**
-   * Checks whether a breaker is currently **closed** (allowing traffic).
+   * Returns all {@link TBreaker} objects for the configured system.
    *
-   * @remarks For automatic metrics, timeouts, and fallback handling, prefer {@link withBreaker}.
-   * On errors (API unreachable, not bootstrapped), returns `true` (fail-open).
-   *
-   * @param breakerSlug - The breaker's slug as configured in the dashboard.
-   * @returns `true` if closed or state unknown, `false` if open or half-open.
-   *
-   * @example
-   * ```typescript
-   * if (await client.isClosed('stripe-api')) {
-   *   await processPayment()
-   * }
-   * ```
-   */
-  public async isClosed(breakerSlug: string): Promise<boolean> {
-    try {
-      const state = await this.fetchBreakerStateWithBudget(breakerSlug)
-      return state === 'closed'
-    } catch (error) {
-      this.handleFailOpen('isClosed', breakerSlug, error)
-      return true
-    }
-  }
-
-  /**
-   * Fetches the full {@link TBreaker} object for a given slug, including current state,
-   * retry-after timestamp, and metadata.
-   *
-   * @param breakerSlug - The breaker's slug as configured in the dashboard.
-   * @param signal - Optional {@link AbortSignal} for cancellation.
-   * @returns The breaker object, or `null` if not found, not bootstrapped, or the
-   *   request exceeded the internal time budget.
-   *
-   * @example
-   * ```typescript
-   * const breaker = await client.getBreaker('stripe-api')
-   * if (breaker?.state === 'open') {
-   *   console.log(`Retry after: ${breaker.retryAfter}`)
-   * }
-   * ```
-   */
-  public async getBreaker(breakerSlug: string, signal?: AbortSignal): Promise<TBreaker | null> {
-    try {
-      const promise = this.breakersFeature.getBreakerBySlug(this.getSystemId(), breakerSlug, signal)
-      return await raceWithTimeout(promise, STATE_FETCH_BUDGET_MS, () => {
-        logger.warn(
-          `getBreaker("${breakerSlug}") exceeded ${STATE_FETCH_BUDGET_MS}ms budget, returning null.`,
-        )
-        return null
-      })
-    } catch (error) {
-      this.handleFailOpen('getBreaker', breakerSlug, error)
-      return null
-    }
-  }
-
-  /**
-   * Fetches all {@link TBreaker} objects for the configured system.
-   *
-   * @returns All breakers with their current state, or `[]` if not bootstrapped
+   * @returns All breakers with their current state, or `[]` if not initialized
    *   or the request fails.
    */
-  public async listBreakers(): Promise<TBreaker[]> {
+  public async breakers(): Promise<TBreaker[]> {
     if (!this.bootstrapData) {
       this.handleFailOpen(
-        'listBreakers',
+        'breakers',
         null,
-        new ConfigurationError('Call bootstrap() before using the SDK'),
+        new ConfigurationError('Call init() before using the SDK'),
       )
       return []
     }
@@ -424,20 +367,20 @@ export class Openfuse {
         STATE_FETCH_BUDGET_MS,
         () => {
           logger.warn(
-            `listBreakers() exceeded ${STATE_FETCH_BUDGET_MS}ms budget, returning empty list.`,
+            `breakers() exceeded ${STATE_FETCH_BUDGET_MS}ms budget, returning empty list.`,
           )
           return []
         },
       )
     } catch (error) {
-      logger.warn('listBreakers() failed, returning empty list:', error)
+      logger.warn('breakers() failed, returning empty list:', error)
       return []
     }
   }
 
   private getSystemId(): string {
     if (!this.bootstrapData) {
-      throw new ConfigurationError('Call bootstrap() before using the SDK')
+      throw new ConfigurationError('Call init() before using the SDK')
     }
     return this.bootstrapData.system.id
   }
@@ -446,18 +389,15 @@ export class Openfuse {
     if (error instanceof ConfigurationError) {
       if (!this.bootstrapWarningLogged) {
         logger.warn(
-          'SDK used before bootstrap completed. Operating in fail-open mode. Ensure bootstrap() is called at startup.',
+          'SDK used before init completed. Operating in fail-open mode. Ensure init() is called at startup.',
         )
         this.bootstrapWarningLogged = true
       }
       return
     }
     if (error instanceof NotFoundError && breakerSlug) {
-      if (
-        this.notFoundWarnings.size < MAX_NOT_FOUND_WARNINGS &&
-        !this.notFoundWarnings.has(breakerSlug)
-      ) {
-        this.notFoundWarnings.add(breakerSlug)
+      if (!this.notFoundWarnings.hasFresh(breakerSlug)) {
+        this.notFoundWarnings.set(breakerSlug, true, NOT_FOUND_WARNING_TTL_MS)
         logger.warn(`Breaker "${breakerSlug}" not found. Operating in fail-open mode.`)
       }
       return
@@ -471,7 +411,7 @@ export class Openfuse {
   }
 
   /**
-   * Wraps fetchBreakerState with a 500ms budget for withBreaker().
+   * Wraps fetchBreakerState with a 500ms budget for protect().
    * The underlying fetch continues in background (updates cache), only this caller gives up.
    */
   private async fetchBreakerStateWithBudget(breakerSlug: string): Promise<TBreakerStateValue> {
@@ -480,60 +420,64 @@ export class Openfuse {
     })
   }
 
-  /**
-   * Wraps a function call with circuit breaker protection and automatic metrics.
-   *
-   * Checks the breaker state, executes `fn` if traffic is allowed, and records
-   * the outcome (success / failure / timeout) along with latency.
-   *
-   * Behavior by breaker state:
-   * - **Closed / Half-open**: executes `fn` normally.
-   * - **Open**: calls `onOpen` fallback if provided, otherwise throws {@link CircuitOpenError}.
-   * - **Unknown** (state fetch failed): calls `onUnknown` if provided, otherwise executes `fn` (fail-open).
-   *
-   * @typeParam T - The return type of `fn` (and fallbacks).
-   * @param breakerSlug - The breaker's slug as configured in the dashboard.
-   * @param fn - The protected function. Receives an {@link AbortSignal} that fires on
-   *   `timeout` expiry or `signal` cancellation.
-   * @param options.timeout - Max execution time for `fn` in ms.
-   * @param options.onOpen - Called instead of `fn` when the breaker is open.
-   *   If omitted, throws {@link CircuitOpenError}.
-   * @param options.onUnknown - Called instead of `fn` when the breaker state cannot be
-   *   determined. If omitted, `fn` executes anyway (fail-open).
-   * @param options.signal - {@link AbortSignal} for external cancellation.
-   * @returns The return value of `fn`, `onOpen`, or `onUnknown`.
-   * @throws {@link CircuitOpenError} When the breaker is open and no `onOpen` is provided.
-   * @throws {@link TimeoutError} When `fn` exceeds `timeout`.
-   *
-   * @example
-   * ```typescript
-   * const charge = await client.withBreaker('stripe-api', async (signal) => {
-   *   return stripe.charges.create({ amount: 1000 }, { signal })
-   * }, {
-   *   timeout: 5000,
-   *   onOpen: () => ({ queued: true }),
-   * })
-   * ```
-   */
-  public async withBreaker<T>(
+  private async checkIsOpen(breakerSlug: string): Promise<boolean> {
+    try {
+      const state = await this.fetchBreakerStateWithBudget(breakerSlug)
+      return state === 'open'
+    } catch (error) {
+      this.handleFailOpen('isOpen', breakerSlug, error)
+      return false
+    }
+  }
+
+  private async checkIsClosed(breakerSlug: string): Promise<boolean> {
+    try {
+      const state = await this.fetchBreakerStateWithBudget(breakerSlug)
+      return state === 'closed'
+    } catch (error) {
+      this.handleFailOpen('isClosed', breakerSlug, error)
+      return true
+    }
+  }
+
+  private async fetchBreakerStatus(
+    breakerSlug: string,
+    signal?: AbortSignal,
+  ): Promise<TBreaker | null> {
+    try {
+      const promise = this.breakersFeature.getBreakerBySlug(this.getSystemId(), breakerSlug, signal)
+      return await raceWithTimeout(promise, STATE_FETCH_BUDGET_MS, () => {
+        logger.warn(
+          `status("${breakerSlug}") exceeded ${STATE_FETCH_BUDGET_MS}ms budget, returning null.`,
+        )
+        return null
+      })
+    } catch (error) {
+      this.handleFailOpen('status', breakerSlug, error)
+      return null
+    }
+  }
+
+  private async executeProtected<T>(
     breakerSlug: string,
     fn: (signal: AbortSignal) => Promise<T> | T,
-    options?: TWithBreakerOptions<T>,
+    options?: TProtectOptions<T>,
   ): Promise<T> {
-    const { timeout, onOpen, onUnknown, signal } = options ?? {}
+    const { timeout, fallback, signal } = options ?? {}
 
     let state: TBreakerStateValue | null = null
     try {
       state = await this.fetchBreakerStateWithBudget(breakerSlug)
     } catch (error) {
-      this.handleFailOpen('withBreaker', breakerSlug, error)
-      if (onUnknown) return await onUnknown()
+      this.handleFailOpen('protect', breakerSlug, error)
       // fail-open: fall through to execute fn()
     }
 
     if (state === 'open') {
-      if (onOpen) return await onOpen()
-      throw new CircuitOpenError(`Breaker is open: ${breakerSlug}`)
+      if (fallback) return await fallback()
+      logger.warn(
+        `Breaker "${breakerSlug}" is open and no fallback was provided. Executing anyway (fail-open).`,
+      )
     }
 
     // state is closed, half-open, or null (unknown, fail-open)
@@ -565,11 +509,11 @@ export class Openfuse {
    * Call this after external changes to breaker configuration (e.g., adding/removing breakers
    * in the dashboard) to force the SDK to re-fetch fresh data.
    */
-  public async invalidate(): Promise<void> {
+  public async reset(): Promise<void> {
     try {
       await this.metricsFeature.flush()
     } catch (error) {
-      logger.warn('Metrics flush failed during invalidation:', error)
+      logger.warn('Metrics flush failed during reset:', error)
     }
     this.metricsFeature.stop()
     this.apiHealthTracker.reset()
@@ -587,7 +531,7 @@ export class Openfuse {
   /**
    * Sends all buffered metrics to the Openfuse backend immediately.
    *
-   * @remarks Prefer {@link shutdown} for full graceful teardown. Use this standalone
+   * @remarks Prefer {@link close} for full graceful teardown. Use this standalone
    *   when you want to flush without stopping the metrics worker.
    */
   public async flushMetrics(): Promise<void> {
@@ -600,9 +544,9 @@ export class Openfuse {
 
   /**
    * Stops the background metrics flush timer. The timer restarts automatically
-   * on the next {@link withBreaker} call, so this is safe to call temporarily.
+   * on the next {@link BreakerHandle.protect} call, so this is safe to call temporarily.
    *
-   * @remarks For permanent shutdown, use {@link shutdown} instead.
+   * @remarks For permanent shutdown, use {@link close} instead.
    */
   public stopMetrics(): void {
     try {
@@ -614,7 +558,7 @@ export class Openfuse {
 
   /**
    * Gracefully shuts down the SDK: flushes pending metrics, stops the metrics worker,
-   * and cancels any in-progress bootstrap retries.
+   * and cancels any in-progress init retries.
    *
    * @param options.timeoutMs - Maximum time to wait for the metrics flush (default: 5000).
    *   If exceeded, shutdown completes but some metrics may be lost.
@@ -622,44 +566,48 @@ export class Openfuse {
    * @example
    * ```typescript
    * process.on('SIGTERM', async () => {
-   *   await client.shutdown()
+   *   await client.close()
    *   process.exit(0)
    * })
    * ```
    */
-  public async shutdown(options?: { timeoutMs?: number }): Promise<void> {
+  public async close(options?: { timeoutMs?: number }): Promise<void> {
     this.isShuttingDown = true
     this.cancelBootstrapRetry()
     this.bootstrapAbortController?.abort()
 
-    const timeoutMs = options?.timeoutMs ?? 5_000
-    const timedOut = await raceWithTimeout(
-      this.flushMetrics().then(() => false),
-      timeoutMs,
-      () => true,
-    )
+    try {
+      const timeoutMs = options?.timeoutMs ?? 5_000
+      const timedOut = await raceWithTimeout(
+        this.flushMetrics().then(() => false),
+        timeoutMs,
+        () => true,
+      )
 
-    if (timedOut) {
-      logger.warn(`Shutdown timed out after ${timeoutMs}ms, some metrics may be lost`)
+      if (timedOut) {
+        logger.warn(`Shutdown timed out after ${timeoutMs}ms, some metrics may be lost`)
+      }
+    } catch (error) {
+      logger.warn('Error during shutdown:', error)
+    } finally {
+      this.metricsFeature.teardown()
     }
-
-    this.metricsFeature.teardown()
   }
 
   /**
-   * Returns the unique instance ID for this SDK process. Auto-generated from
+   * The unique instance ID for this SDK process. Auto-generated from
    * the platform environment (Lambda, ECS, K8s, etc.) or overridden via
    * {@link TOpenfuseOptions.instanceId}.
    */
-  public getInstanceId(): string {
-    return this.instanceId
+  public get instanceId(): string {
+    return this._instanceId
   }
 
   private createMetricsFeature(): MetricsFeature {
     return new MetricsFeature({
       api: this.metricsApi,
       breakersFeature: this.breakersFeature,
-      instanceId: this.instanceId,
+      instanceId: this._instanceId,
       config: this.metricsConfig,
       getSystemId: () => this.bootstrapData?.system?.id ?? null,
     })

@@ -22,23 +22,21 @@ npm install @openfuseio/sdk
 import { OpenfuseCloud } from '@openfuseio/sdk'
 
 const client = new OpenfuseCloud({
-  systemSlug: 'checkout',
+  system: 'checkout',
   clientId: 'your-client-id',
   clientSecret: 'your-client-secret',
 })
 
-await client.bootstrap()
+client.init()
 
-const recommendations = await client.withBreaker(
-  'recommendations',
-  () => fetchRecommendations(userId),
-  { onOpen: () => [] },
-)
+const recommendations = await client
+  .breaker('recommendations')
+  .protect(() => fetchRecommendations(userId), { fallback: () => [] })
 ```
 
-If `recommendations` breaker is open, `onOpen` returns an empty array immediately, no network call attempted.
+If `recommendations` breaker is open, `fallback` returns an empty array immediately, no network call attempted.
 
-## Circuit Breaker States
+## Breaker States
 
 - **Closed** — Requests flow through normally
 - **Open** — Requests blocked, fallback triggered
@@ -46,30 +44,30 @@ If `recommendations` breaker is open, `onOpen` returns an empty array immediatel
 
 ## API Reference
 
-### Core Methods
+### Lifecycle
 
-| Method                        | Description                                           |
-| ----------------------------- | ----------------------------------------------------- |
-| `bootstrap()`                 | Fetch breaker configuration. Call once at startup.    |
-| `withBreaker(slug, fn, opts)` | Execute function with circuit breaker protection.     |
-| `shutdown()`                  | Flush metrics and clean up. Call before process exit. |
+| Method    | Description                                           |
+| --------- | ----------------------------------------------------- |
+| `init()`  | Fetch breaker configuration. Call once at startup.    |
+| `ready()` | Resolves when init completes. Optional.               |
+| `close()` | Flush metrics and clean up. Call before process exit. |
+| `reset()` | Clear cached state and flush metrics.                 |
 
-### State Methods
+### Breaker Handle
 
-| Method                    | Description                           |
-| ------------------------- | ------------------------------------- |
-| `isOpen(slug, signal?)`   | Returns `true` if breaker is open.    |
-| `isClosed(slug, signal?)` | Returns `true` if breaker is closed.  |
-| `getBreaker(slug)`        | Returns breaker details.              |
-| `listBreakers()`          | Returns all breakers for the system.  |
-| `invalidate()`            | Clear cached state and flush metrics. |
+| Method                            | Description                               |
+| --------------------------------- | ----------------------------------------- |
+| `breaker(slug).protect(fn, opts)` | Execute function with breaker protection. |
+| `breaker(slug).isOpen()`          | Returns `true` if breaker is open.        |
+| `breaker(slug).isClosed()`        | Returns `true` if breaker is closed.      |
+| `breaker(slug).status(signal?)`   | Returns full breaker details.             |
+| `breakers()`                      | Returns all breakers for the system.      |
 
-### withBreaker Options
+### protect Options
 
 ```ts
-await client.withBreaker('my-breaker', () => doSomething(), {
-  onOpen: () => fallbackValue, // Called when breaker is open
-  onUnknown: () => degradedValue, // Called when state can't be determined
+await client.breaker('my-breaker').protect(() => doSomething(), {
+  fallback: () => fallbackValue, // Called when breaker is open
   timeout: 5000, // Timeout in ms for the wrapped function
   signal: abortController.signal, // AbortSignal for cancellation
 })
@@ -82,12 +80,12 @@ import { Openfuse } from '@openfuseio/sdk'
 
 const client = new Openfuse({
   baseUrl: 'https://openfuse.internal.mycompany.com',
-  systemSlug: 'checkout',
+  system: 'checkout',
   clientId: 'your-client-id',
   clientSecret: 'your-client-secret',
 })
 
-await client.bootstrap()
+client.init()
 ```
 
 ## License

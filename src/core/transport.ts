@@ -120,7 +120,10 @@ export class Transport {
             continue
           }
           const errorDetail = await extractResponseErrorDetail(httpResponse)
-          throw new APIError(`HTTP ${httpResponse.status} for ${httpMethod} ${path}${errorDetail}`)
+          throw new APIError(
+            `HTTP ${httpResponse.status} for ${httpMethod} ${path}${errorDetail}`,
+            httpResponse.status,
+          )
         }
 
         if (httpResponse.status === 204) return undefined as unknown as TResponse
@@ -129,6 +132,9 @@ export class Transport {
       } catch (caughtError) {
         lastError = caughtError
         if (caughtError instanceof APIError || caughtError instanceof AuthError) throw caughtError
+        if (caughtError instanceof SyntaxError) {
+          throw new APIError(`Invalid JSON response for ${httpMethod} ${path}`)
+        }
         if (requestOptions.signal?.aborted) throw caughtError
         if (attemptIndex < retryPolicy.attempts - 1) {
           await sleep(

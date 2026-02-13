@@ -95,7 +95,7 @@ export type TTestContext = {
   apiClient: TestAPIClient
   system: TTestSystem
   breakers: TTestBreaker[]
-  createSDKClient: (systemSlug?: string) => Openfuse
+  createSDKClient: (system?: string) => Openfuse
 }
 
 /**
@@ -273,10 +273,10 @@ export function uniqueSlug(base: string): string {
   return `${base}-${random}`
 }
 
-export function createSDKClient(systemSlug: string): Openfuse {
+export function createSDKClient(system: string): Openfuse {
   return new Openfuse({
     baseUrl: E2E_CONFIG.apiBase,
-    systemSlug,
+    system,
     clientId: E2E_CONFIG.clientId,
     clientSecret: E2E_CONFIG.clientSecret,
     metrics: { windowSizeMs: 5_000, flushIntervalMs: 10_000 },
@@ -325,8 +325,7 @@ export function setupE2ETest(options?: {
       context.breakers.push(breaker)
     }
 
-    context.createSDKClient = (systemSlug?: string) =>
-      createSDKClient(systemSlug ?? context.system.slug)
+    context.createSDKClient = (system?: string) => createSDKClient(system ?? context.system.slug)
   })
 
   afterAll(async () => {
@@ -354,8 +353,7 @@ export function setupE2ETestWithExistingData(options: { systemSlug: string }): T
     )
     context.system = await context.apiClient.getSystemBySlug(options.systemSlug)
     context.breakers = await context.apiClient.listBreakers(context.system.id)
-    context.createSDKClient = (systemSlug?: string) =>
-      createSDKClient(systemSlug ?? context.system.slug)
+    context.createSDKClient = (system?: string) => createSDKClient(system ?? context.system.slug)
   })
 
   return context

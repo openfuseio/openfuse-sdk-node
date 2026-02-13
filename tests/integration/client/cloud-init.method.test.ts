@@ -18,7 +18,7 @@ describe('OpenfuseCloud URL routing', () => {
 
   function createClient() {
     return new OpenfuseCloud({
-      systemSlug: system.slug,
+      system: system.slug,
       clientId: 'test-client-id',
       clientSecret: 'test-client-secret',
     })
@@ -32,26 +32,26 @@ describe('OpenfuseCloud URL routing', () => {
     fetchMock.restore()
   })
 
-  it('bootstrap calls POST https://api.openfuse.io/v1/sdk/auth/bootstrap', async () => {
+  it('init calls POST https://api.openfuse.io/v1/sdk/auth/bootstrap', async () => {
     fetchMock.pushJson({ data: bootstrapResponse })
 
     const client = createClient()
-    client.bootstrap()
-    await client.whenReady()
+    client.init()
+    await client.ready()
 
     expect(fetchMock.calls).toHaveLength(1)
     expect(fetchMock.calls[0].url).toBe('https://api.openfuse.io/v1/sdk/auth/bootstrap')
     expect(fetchMock.calls[0].init?.method).toBe('POST')
   })
 
-  it('after bootstrap, getBreaker calls the environment-specific URL', async () => {
+  it('after init, status calls the environment-specific URL', async () => {
     fetchMock.pushJson({ data: bootstrapResponse })
     fetchMock.pushJson({ data: breaker })
 
     const client = createClient()
-    client.bootstrap()
-    await client.whenReady()
-    await client.getBreaker(breaker.slug)
+    client.init()
+    await client.ready()
+    await client.breaker(breaker.slug).status()
 
     expect(fetchMock.calls).toHaveLength(2)
     expect(fetchMock.calls[1].url).toBe(
@@ -59,31 +59,31 @@ describe('OpenfuseCloud URL routing', () => {
     )
   })
 
-  it('after bootstrap, isOpen calls the environment-specific URL', async () => {
+  it('after init, isOpen calls the environment-specific URL', async () => {
     // Bootstrap without breakers so state must be fetched from API
     fetchMock.pushJson({ data: { ...bootstrapResponse, breakers: [] } })
     fetchMock.pushJson({ data: [breaker] }) // listBreakers for slug→id mapping
     fetchMock.pushJson({ data: breaker }) // getBreaker for state
 
     const client = createClient()
-    client.bootstrap()
-    await client.whenReady()
-    await client.isOpen(breaker.slug)
+    client.init()
+    await client.ready()
+    await client.breaker(breaker.slug).isOpen()
 
     expect(fetchMock.calls).toHaveLength(3)
-    // Both post-bootstrap calls should use environment-specific URL
+    // Both post-init calls should use environment-specific URL
     expect(fetchMock.calls[1].url).toContain('https://prod-acme.api.openfuse.io/v1/systems/')
     expect(fetchMock.calls[2].url).toContain('https://prod-acme.api.openfuse.io/v1/systems/')
   })
 
-  it('after bootstrap, listBreakers calls the environment-specific URL', async () => {
+  it('after init, breakers calls the environment-specific URL', async () => {
     fetchMock.pushJson({ data: bootstrapResponse })
     fetchMock.pushJson({ data: [breaker] })
 
     const client = createClient()
-    client.bootstrap()
-    await client.whenReady()
-    await client.listBreakers()
+    client.init()
+    await client.ready()
+    await client.breakers()
 
     expect(fetchMock.calls).toHaveLength(2)
     expect(fetchMock.calls[1].url).toBe(
@@ -91,7 +91,7 @@ describe('OpenfuseCloud URL routing', () => {
     )
   })
 
-  it('after bootstrap, metrics ingest calls the environment-specific URL', async () => {
+  it('after init, metrics ingest calls the environment-specific URL', async () => {
     const metricsResponse = makeSdkBootstrapResponse({
       system,
       breakers: [breaker],
@@ -107,16 +107,16 @@ describe('OpenfuseCloud URL routing', () => {
     fetchMock.pushJson({ data: { ingested: 1 } })
 
     const client = new OpenfuseCloud({
-      systemSlug: system.slug,
+      system: system.slug,
       clientId: 'test-client-id',
       clientSecret: 'test-client-secret',
       metrics: { flushIntervalMs: 100, windowSizeMs: 50 },
     })
-    client.bootstrap()
-    await client.whenReady()
+    client.init()
+    await client.ready()
 
-    // Trigger a metric recording via withBreaker
-    await client.withBreaker(breaker.slug, () => 'ok')
+    // Trigger a metric recording via protect
+    await client.breaker(breaker.slug).protect(() => 'ok')
 
     // Wait for the flush interval to fire
     await new Promise((r) => setTimeout(r, 250))
@@ -125,6 +125,6 @@ describe('OpenfuseCloud URL routing', () => {
     expect(metricsCall).toBeDefined()
     expect(metricsCall?.url).toMatch(/^https:\/\/prod-acme\.api\.openfuse\.io\/v1\/metrics/)
 
-    await client.shutdown()
+    await client.close()
   })
 })

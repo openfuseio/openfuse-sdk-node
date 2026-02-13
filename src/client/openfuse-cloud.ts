@@ -6,7 +6,7 @@ const OPENFUSE_CLOUD_API_URL = 'https://api.openfuse.io'
 
 export type TOpenfuseCloudOptions = {
   /** System slug that groups related breakers */
-  systemSlug: string
+  system: string
   /** SDK client ID from Openfuse Cloud dashboard */
   clientId: string
   /** SDK client secret from Openfuse Cloud dashboard */
@@ -24,21 +24,21 @@ export type TOpenfuseCloudOptions = {
  * @example
  * ```typescript
  * const client = new OpenfuseCloud({
- *   systemSlug: 'payments',
+ *   system: 'payments',
  *   clientId: 'sdk_abc123',
  *   clientSecret: 'secret_xyz',
  * })
  *
- * await client.bootstrap()
+ * await client.init()
  *
- * const isOpen = await client.isOpen('external-api')
+ * const isOpen = await client.breaker('external-api').isOpen()
  * ```
  */
 export class OpenfuseCloud extends Openfuse {
   constructor(options: TOpenfuseCloudOptions) {
     super({
       baseUrl: OPENFUSE_CLOUD_API_URL,
-      systemSlug: options.systemSlug,
+      system: options.system,
       clientId: options.clientId,
       clientSecret: options.clientSecret,
       metrics: options.metrics,

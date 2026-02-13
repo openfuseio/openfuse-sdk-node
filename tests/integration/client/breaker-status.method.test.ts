@@ -1,14 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  bootstrapClient,
   createTestClient,
-  makeSdkBootstrapResponse,
-  makeBreaker,
-  makeSystem,
   setupAPISpies,
   type TAPISpies,
 } from '../../helpers/index.ts'
 
-describe('Openfuse.getBreaker', () => {
+describe('Openfuse.breaker(slug).status', () => {
   let mockAPI: TAPISpies
 
   beforeEach(() => {
@@ -21,19 +19,11 @@ describe('Openfuse.getBreaker', () => {
 
   describe('mapping available (via bootstrap)', () => {
     it('calls API for the model and never calls listBreakers; repeated calls hit API again (no model cache)', async () => {
-      const system = makeSystem()
-      const breaker = makeBreaker()
-
-      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [breaker] })
-      mockAPI.auth.bootstrap.mockResolvedValueOnce(bootstrapResponse)
+      const { breaker, bootstrapResponse, client } = await bootstrapClient(mockAPI)
       mockAPI.breakers.getBreaker.mockResolvedValue(breaker)
 
-      const client = createTestClient({ systemSlug: system.slug })
-      client.bootstrap()
-      await client.whenReady()
-
-      const a = await client.getBreaker(breaker.slug)
-      const b = await client.getBreaker(breaker.slug)
+      const a = await client.breaker(breaker.slug).status()
+      const b = await client.breaker(breaker.slug).status()
 
       expect(a).toEqual(breaker)
       expect(b).toEqual(breaker)
@@ -55,24 +45,16 @@ describe('Openfuse.getBreaker', () => {
     })
   })
 
-  describe('invalidate()', () => {
-    it('drops mapping; next getBreaker rebuilds mapping (listBreakers) and calls API again', async () => {
-      const system = makeSystem()
-      const breaker = makeBreaker()
-
-      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [breaker] })
-      mockAPI.auth.bootstrap.mockResolvedValueOnce(bootstrapResponse)
+  describe('reset()', () => {
+    it('drops mapping; next status rebuilds mapping (listBreakers) and calls API again', async () => {
+      const { breaker, bootstrapResponse, client } = await bootstrapClient(mockAPI)
       mockAPI.breakers.listBreakers.mockResolvedValue([breaker])
       mockAPI.breakers.getBreaker.mockResolvedValue(breaker)
 
-      const client = createTestClient({ systemSlug: system.slug })
-      client.bootstrap()
-      await client.whenReady()
+      await client.breaker(breaker.slug).status()
+      await client.reset()
 
-      await client.getBreaker(breaker.slug)
-      await client.invalidate()
-
-      const again = await client.getBreaker(breaker.slug)
+      const again = await client.breaker(breaker.slug).status()
       expect(again).toEqual(breaker)
       expect(mockAPI.breakers.listBreakers).toHaveBeenCalledWith(bootstrapResponse.system.id)
       expect(mockAPI.breakers.getBreaker).toHaveBeenCalledTimes(2)
@@ -81,19 +63,11 @@ describe('Openfuse.getBreaker', () => {
 
   describe('signal', () => {
     it('forwards AbortSignal to getBreaker', async () => {
-      const system = makeSystem()
-      const breaker = makeBreaker()
-
-      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [breaker] })
-      mockAPI.auth.bootstrap.mockResolvedValueOnce(bootstrapResponse)
+      const { breaker, bootstrapResponse, client } = await bootstrapClient(mockAPI)
       mockAPI.breakers.getBreaker.mockResolvedValue(breaker)
 
-      const client = createTestClient({ systemSlug: system.slug })
-      client.bootstrap()
-      await client.whenReady()
-
       const ac = new AbortController()
-      const model = await client.getBreaker(breaker.slug, ac.signal)
+      const model = await client.breaker(breaker.slug).status(ac.signal)
       expect(model).toEqual(breaker)
       expect(mockAPI.breakers.getBreaker).toHaveBeenCalledWith(
         bootstrapResponse.system.id,
@@ -105,27 +79,19 @@ describe('Openfuse.getBreaker', () => {
 
   describe('API down (no model cache fallback)', () => {
     it('returns null when getBreaker fails (mapping available)', async () => {
-      const system = makeSystem()
-      const breaker = makeBreaker()
-
-      const bootstrapResponse = makeSdkBootstrapResponse({ system, breakers: [breaker] })
-      mockAPI.auth.bootstrap.mockResolvedValueOnce(bootstrapResponse)
+      const { breaker, client } = await bootstrapClient(mockAPI)
       mockAPI.breakers.getBreaker.mockRejectedValue(new Error('down'))
 
-      const client = createTestClient({ systemSlug: system.slug })
-      client.bootstrap()
-      await client.whenReady()
-
-      const result = await client.getBreaker(breaker.slug)
+      const result = await client.breaker(breaker.slug).status()
       expect(result).toBeNull()
       expect(mockAPI.breakers.listBreakers).not.toHaveBeenCalled()
     })
   })
 
-  describe('before bootstrap', () => {
-    it('returns null when called before bootstrap()', async () => {
+  describe('before init', () => {
+    it('returns null when called before init()', async () => {
       const client = createTestClient()
-      const result = await client.getBreaker('any-breaker')
+      const result = await client.breaker('any-breaker').status()
       expect(result).toBeNull()
     })
   })

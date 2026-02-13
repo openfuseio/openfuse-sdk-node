@@ -6,7 +6,7 @@ export const TEST_CONFIG = {
   baseUrl: 'https://api.test.com',
   clientId: 'test-client-id',
   clientSecret: 'test-client-secret',
-  systemSlug: 'test-system',
+  system: 'test-system',
 } as const
 
 export type TTestConfig = typeof TEST_CONFIG

@@ -1,5 +1,5 @@
 import { InflightRequests, TTLCache } from '../../core/cache.ts'
-import { APIError, NotFoundError } from '../../core/errors.ts'
+import { APIError, NotFoundError, isServerOrNetworkError } from '../../core/errors.ts'
 import type { ApiHealthTracker } from '../../core/api-health.ts'
 import type { TBreaker, TBreakerStateValue } from '../../types/api.ts'
 import type { TBreakersApi } from './breakers.api.ts'
@@ -98,8 +98,8 @@ export class BreakersFeature {
     if (stale) {
       this.inflightRequests
         .run(`state:${breakerId}`, () => this.fetchAndCacheState(systemId, breakerId))
-        .catch(() => {
-          this.apiHealth?.recordFailure()
+        .catch((error) => {
+          if (isServerOrNetworkError(error)) this.apiHealth?.recordFailure()
         })
       return stale
     }
@@ -112,7 +112,7 @@ export class BreakersFeature {
       )
       return state as TBreakerStateValue
     } catch (error) {
-      this.apiHealth?.recordFailure()
+      if (isServerOrNetworkError(error)) this.apiHealth?.recordFailure()
       throw error
     }
   }
@@ -150,7 +150,7 @@ export class BreakersFeature {
         this.refreshMappingFromApi(systemId),
       )
     } catch (error) {
-      this.apiHealth?.recordFailure()
+      if (isServerOrNetworkError(error)) this.apiHealth?.recordFailure()
       throw error
     }
 
